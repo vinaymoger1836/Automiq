@@ -1,0 +1,38 @@
+[project]
+name = "automiq"
+version = "0.1.0"
+description = "Agentic workflow automation engine bootstrap"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+  "asyncpg>=0.30,<1",
+  "fastapi>=0.115,<1",
+  "pydantic-settings>=2.7,<3",
+  "redis>=5.2,<7",
+  "sqlalchemy[asyncio]>=2.0,<3",
+  "temporalio>=1.10,<2",
+  "uvicorn[standard]>=0.34,<1",
+]
+
+[dependency-groups]
+dev = ["httpx>=0.28,<1", "mypy>=1.15,<2", "pytest>=9.0.3,<10", "ruff>=0.9,<1"]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+include = ["apps/**/*.py", "services/**/*.py", "scripts/**/*.py", "tests/**/*.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+mypy_path = ["apps/api", "services/orchestrator"]
+files = ["apps/api", "services/orchestrator", "scripts/smoke.py"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/e2e"]
+pythonpath = ["apps/api", "services/orchestrator"]
