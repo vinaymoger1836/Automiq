@@ -13,7 +13,6 @@ from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
 
-
 @activity.defn(name="load_run")
 async def load_run(run_id: str) -> dict[str, Any]:
     async with session_factory()() as db:

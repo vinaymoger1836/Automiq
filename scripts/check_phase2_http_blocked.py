@@ -6,7 +6,6 @@ import uuid
 from pathlib import Path
 
 import httpx
-
 from check_phase2_http import BASE, ORIGIN, graph, terminal
 
 
@@ -51,9 +50,7 @@ async def main() -> None:
         assert started.status_code == 202, started.text
         run = await terminal(client, f"/api/v1/workspaces/{ws}/runs/{started.json()['run_id']}")
         assert run["status"] == "failed", run
-        action_errors = [
-            step["error"] for step in run["steps"] if step["node_id"] == "action"
-        ]
+        action_errors = [step["error"] for step in run["steps"] if step["node_id"] == "action"]
         assert action_errors == ["unsafe_destination"], action_errors
     target = Path("artifacts/e2e/phase2-http/blocked.json")
     target.parent.mkdir(parents=True, exist_ok=True)

@@ -59,8 +59,7 @@ async def main() -> None:
         assert validation.status_code == 200, validation.text
         assert validation.json()["valid"] is False
         assert any(
-            item["code"] == "http_connector_disabled"
-            for item in validation.json()["diagnostics"]
+            item["code"] == "http_connector_disabled" for item in validation.json()["diagnostics"]
         )
         saved = await client.put(
             f"{base}/draft",
