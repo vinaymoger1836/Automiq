@@ -57,10 +57,10 @@ export default function Home() {
       <section className="hero" aria-labelledby="page-title">
         <div className="eyebrow"><span className="eyebrow-dot" /> WORKSPACE / LOCAL DEVELOPMENT</div>
         <h1 id="page-title">Build with confidence.<br /><span>Run with clarity.</span></h1>
-        <p>Welcome to Automiq. Your local workflow engine is taking shape. Check the foundation below before building your first automation.</p>
+        <p>Design, publish, and follow durable automations from one workspace. Your local engine is ready for its first workflow.</p>
         <div className="hero-actions">
-          <a className="primary-link" href="#health">View system status <span aria-hidden="true">↗</span></a>
-          <span className="phase-label">PHASE 00 <span aria-hidden="true">/</span> FOUNDATION</span>
+          <a className="primary-link" href="/studio">Open workflow studio <span aria-hidden="true">↗</span></a>
+          <a className="phase-label" href="#health">VIEW SYSTEM STATUS <span aria-hidden="true">↗</span></a>
         </div>
       </section>
 
