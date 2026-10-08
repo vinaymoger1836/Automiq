@@ -2,18 +2,18 @@
 
 ## Start and inspect
 
-Copy `.env.example` to `.env`, then run `docker compose --env-file .env -f infra/compose.yaml up -d --build`. Inspect services with `docker compose --env-file .env -f infra/compose.yaml ps` and logs with `docker compose --env-file .env -f infra/compose.yaml logs --tail=100 api worker temporal`. The API readiness endpoint checks PostgreSQL, Redis, and Temporal. The liveness endpoint checks only the API process.
+Copy `.env.example` to `.env` and run `docker compose --env-file .env -f infra/compose.yaml up -d --build`. Apply migrations with `docker compose --env-file .env -f infra/compose.yaml exec -T api uv run --frozen --no-dev alembic -c alembic.ini upgrade head`. Inspect service health with `docker compose --env-file .env -f infra/compose.yaml ps` and local logs with `docker compose --env-file .env -f infra/compose.yaml logs --tail=100 api worker temporal`. Avoid sharing unsanitized logs.
 
-Run `docker compose --env-file .env -f infra/compose.yaml exec -T worker uv run --frozen --no-dev python /app/scripts/smoke.py` to prove a worker is polling and its PostgreSQL activity succeeds. A failing workflow points first to worker or Temporal logs; a degraded readiness response identifies the failed dependency without revealing connection strings.
+Run `docker compose --env-file .env -f infra/compose.yaml exec -T worker uv run --frozen --no-dev python /app/scripts/smoke.py` to prove Temporal polling and PostgreSQL access. `/health/ready` checks PostgreSQL, Redis, and Temporal; `/health/live` checks only the API process. Browser entry point: `http://localhost:3000/studio`.
 
-## Failure recovery
+## Workflow and run recovery
 
-Compose restarts the worker if it exits. Re-run the smoke workflow after recovery. `docker compose ... down` leaves named volumes intact. Do not use `down -v` unless you intend to delete local state. Never paste `.env` contents or unsanitized logs into issues.
+An accepted manual run and its start-outbox row are committed together. The worker reconciles pending rows to Temporal using `run:<uuid>` as the workflow ID. If an API request succeeds but a run remains queued, inspect worker health and the outbox; restarting the worker retries the start. If a worker stops while an activity is in flight, Temporal retries the activity according to its policy. Mock effects are recorded by stable run/node key, and run projections have unique event keys. Real external actions would need provider-specific deduplication or reconciliation.
 
-## Phase 0 limits
+`docker compose --env-file .env -f infra/compose.yaml down` leaves named volumes intact. Do not remove volumes to recover a stalled run. The fault-injection E2E script in `scripts/check_phase2_faults.py` exercises API restart, worker restart, retry, timeout, permanent failure, and duplicate Temporal start on the local stack only.
 
-Health checks are infrastructure checks, not proof of identity, tenant isolation, or workflow run behavior. The bootstrap workflow is a development smoke operation and carries no user data. At the Phase 0 handoff, no business migrations or real integrations were present.
+## Evidence and current limits
 
-## Phase 1 schema
+Use the exact setup and check commands in [README](../README.md). Synthetic E2E reports are saved as `artifacts/e2e/phase1-workflows/report.json`, `artifacts/e2e/phase2-runs/report.json`, `artifacts/e2e/phase2-faults/report.json`, and `artifacts/e2e/phase3-studio/playwright.xml`. Browser screenshots under `artifacts/e2e/phase3-studio/` cover light and dark themes at mobile and desktop sizes. These paths are Git-ignored. The tests use synthetic identities and mock actions; no paid provider calls are made.
 
-After Compose is healthy, run `docker compose --env-file .env -f infra/compose.yaml exec -T api uv run --frozen --no-dev alembic -c alembic.ini upgrade head`. Run `alembic -c alembic.ini check` in the API container to compare the ORM metadata with the database, then run `python /app/scripts/check_phase1_schema.py` there to verify constraints using rolled-back synthetic rows. The migration is forward-only; the [migration notes](../infra/migrations/README.md) explain backup-based rollback. No Phase 1 authentication or workspace API has been enabled yet.
+The OIDC login path is implemented but needs a configured live provider exchange before a production claim. The restricted real HTTP connector in P2-06 is still open, so HTTP actions only run through the mock adapter. Production egress also needs network-level restrictions. See [migration notes](../infra/migrations/README.md) before any rollback; migrations are forward-only and data-preserving.

@@ -41,6 +41,18 @@ async def main() -> None:
         assert started.status_code == 202, started.text
         run_id = started.json()["run_id"]
         assert started.json()["version_id"]
+        versions = await owner.get(
+            f"/api/v1/workspaces/{ws}/workflows/{workflow_id}/versions"
+        )
+        assert versions.status_code == 200, versions.text
+        pinned = next(
+            version for version in versions.json() if version["id"] == started.json()["version_id"]
+        )
+        expected_output = next(
+            node["config"]["mock_output"]
+            for node in pinned["graph"]["nodes"]
+            if node["id"] == "action"
+        )
         scenarios.append("manual run transaction returns queued pinned run")
         duplicate = await owner.post(
             f"/api/v1/workspaces/{ws}/workflows/{workflow_id}/runs",
@@ -68,7 +80,7 @@ async def main() -> None:
             steps[node]["status"] == "succeeded" for node in ("start", "action", "route", "yes")
         )
         assert steps["no"]["status"] == "skipped"
-        assert steps["action"]["output"]["ok"] is False
+        assert steps["action"]["output"] == expected_output
         scenarios.append("Temporal traverses pinned DAG and projects succeeded/skipped nodes")
         stream_path = f"{path}/events"
         stream = await owner.get(stream_path)
@@ -86,6 +98,10 @@ async def main() -> None:
         viewer_me = (await viewer.get("/api/v1/me")).json()
         readable = await viewer.get(path)
         assert readable.status_code == 200, readable.text
+        assert readable.json()["input"] == {"redacted": True}
+        assert all(step["output"] is None for step in readable.json()["steps"])
+        viewer_stream = await viewer.get(stream_path)
+        assert viewer_stream.status_code == 200 and '"output"' not in viewer_stream.text
         denied = await viewer.post(
             f"/api/v1/workspaces/{ws}/workflows/{workflow_id}/runs",
             headers={
@@ -96,7 +112,7 @@ async def main() -> None:
             json={"payload": {}},
         )
         assert denied.status_code == 403, denied.text
-        scenarios.append("viewer inspects run but cannot start one")
+        scenarios.append("viewer sees redacted history and cannot start a run")
     report = {
         "phase": "P2",
         "status": "passed",

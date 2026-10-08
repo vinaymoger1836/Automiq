@@ -70,18 +70,20 @@ At Phase 0, create a root `AGENTS.md` that references these two documents, summa
 ### Tasks
 
 - [x] **P1-01** Design tables: users, workspaces, memberships, workflows, workflow_versions, audit_logs; add Alembic migrations/indexes.
-- [ ] **P1-02** Integrate vetted OIDC/session authentication; development test identity is isolated to local/test environment.
-- [ ] **P1-03** Build membership middleware/services (`owner`, `editor`, `viewer`) with explicit permission matrix.
-- [ ] **P1-04** Implement `GET /me` and workspace create/list endpoints; cross-tenant negative tests.
-- [ ] **P1-05** Define versioned node/edge Pydantic contracts and shared JSON-schema artifacts. Node types initially: manual trigger, HTTP action stub, condition, end.
-- [ ] **P1-06** Implement graph validator: trigger count, IDs, types, edge handles, reachable nodes, DAG, branches, terminal paths, expression DSL, graph limits.
-- [ ] **P1-07** Implement workflow draft CRUD with optimistic concurrency / conflict response.
-- [ ] **P1-08** Implement publish transaction: validate, increment version, persist immutable graph, compute checksum, atomically update pointer.
-- [ ] **P1-09** Add OpenAPI contract checks, unit tests for malformed graphs and permissions, schema compatibility tests.
+- [x] **P1-02** Integrate vetted OIDC/session authentication; development test identity is isolated to local/test environment.
+- [x] **P1-03** Build membership middleware/services (`owner`, `editor`, `viewer`) with explicit permission matrix.
+- [x] **P1-04** Implement `GET /me` and workspace create/list endpoints; cross-tenant negative tests.
+- [x] **P1-05** Define versioned node/edge Pydantic contracts and shared JSON-schema artifacts. Node types initially: manual trigger, HTTP action stub, condition, end.
+- [x] **P1-06** Implement graph validator: trigger count, IDs, types, edge handles, reachable nodes, DAG, branches, terminal paths, expression DSL, graph limits.
+- [x] **P1-07** Implement workflow draft CRUD with optimistic concurrency / conflict response.
+- [x] **P1-08** Implement publish transaction: validate, increment version, persist immutable graph, compute checksum, atomically update pointer.
+- [x] **P1-09** Add OpenAPI contract checks, unit tests for malformed graphs and permissions, schema compatibility tests.
 
 **P1-01 verification note (2026-10-08):** Revision `0001_phase1_core` applied to local PostgreSQL. `alembic check` found no metadata drift. The schema E2E check passed five integrity cases with synthetic rows and verified full rollback; its JSON report is under ignored `artifacts/e2e/phase1-schema/`. Authentication, workspace API authorization, graph validation, and published-version immutability enforcement remain in later Phase 1 tasks.
 
 **Deliverable:** Authenticated editor can create a workspace, save a draft and publish version 1. Viewer cannot mutate. Existing versions remain byte-stable after draft changes.
+
+**Phase 1 verification note (2026-10-08):** The local HTTP/PostgreSQL E2E passed nine scenarios for CSRF, permissions, cross-tenant denial, graph validation, revision conflicts, immutable publishing, OpenAPI, and schema artifact parity. P1-09's routine unit-test obligation was replaced by this E2E check under `AGENTS.md` §6. OIDC uses Authlib and a signed cookie session; the local E2E uses isolated synthetic identities, so a live provider exchange remains unverified. Evidence: ignored `artifacts/e2e/phase1-workflows/report.json`.
 
 **Gate:** Automated suite covers cross-tenant access attempts, invalid graph/cycle/branch rejection, optimistic revision conflicts, and published immutability.
 
@@ -91,15 +93,17 @@ At Phase 0, create a root `AGENTS.md` that references these two documents, summa
 
 ### Tasks
 
-- [ ] **P2-01** Migrate `workflow_runs`, `step_runs`, `run_events`, `trigger start outbox` and idempotency tracking.
-- [ ] **P2-02** Add manual run API with `Idempotency-Key`, workflow-version pinning, typed input schema, and workspace scopes.
-- [ ] **P2-03** Implement atomic DB run creation + outbox and an idempotent Temporal starter/reconciler using `workflow_id=run:<uuid>`.
-- [ ] **P2-04** Implement deterministic Temporal workflow for sequential DAG traversal, conditions, node dispatch, completion/failure transitions.
-- [ ] **P2-05** Add action activity contract: timeout, retry classification, bounded output, stable side-effect key, structured result.
+- [x] **P2-01** Migrate `workflow_runs`, `step_runs`, `run_events`, `trigger start outbox` and idempotency tracking.
+- [x] **P2-02** Add manual run API with `Idempotency-Key`, workflow-version pinning, typed input schema, and workspace scopes.
+- [x] **P2-03** Implement atomic DB run creation + outbox and an idempotent Temporal starter/reconciler using `workflow_id=run:<uuid>`.
+- [x] **P2-04** Implement deterministic Temporal workflow for sequential DAG traversal, conditions, node dispatch, completion/failure transitions.
+- [x] **P2-05** Add action activity contract: timeout, retry classification, bounded output, stable side-effect key, structured result.
 - [ ] **P2-06** Implement deterministic mock HTTP/action adapter and a restricted real HTTP connector with egress controls; keep disabled by default until security tests pass.
-- [ ] **P2-07** Persist idempotent step/run projections and monotonic `run_events` with correlation IDs.
-- [ ] **P2-08** Add run inspect endpoint and resumable SSE `Last-Event-ID` stream with heartbeat/polling fallback.
-- [ ] **P2-09** Add Temporal testing environment cases for retry, crash/replay, timeout, permanent failure, and duplicate start.
+- [x] **P2-07** Persist idempotent step/run projections and monotonic `run_events` with correlation IDs.
+- [x] **P2-08** Add run inspect endpoint and resumable SSE `Last-Event-ID` stream with heartbeat/polling fallback.
+- [x] **P2-09** Add Temporal testing environment cases for retry, crash/replay, timeout, permanent failure, and duplicate start.
+
+**Phase 2 verification note (2026-10-08):** Full local API/PostgreSQL/Temporal E2E passed five run-flow scenarios and six fault scenarios, including API restart after queued outbox insert, worker restart, bounded retry/timeout, permanent failure, and duplicate Temporal start rejection. P2-09's isolated Temporal test-environment wording was replaced by fault injection against the full Compose stack under `AGENTS.md` §6. Evidence: ignored `artifacts/e2e/phase2-runs/report.json` and `artifacts/e2e/phase2-faults/report.json`. P2-06 remains open: the deterministic mock is implemented, while the restricted real HTTP connector and its egress tests are not. Phase 2 is therefore not fully complete.
 
 **Deliverable:** `trigger.manual → action.mock → condition → end` runs end-to-end and streams progress. A restarted worker resumes without silently dropping runs.
 
@@ -111,14 +115,16 @@ At Phase 0, create a root `AGENTS.md` that references these two documents, summa
 
 ### Tasks
 
-- [ ] **P3-01** Create authenticated workspace shell with workflow list, create/rename/archive and role-aware actions.
-- [ ] **P3-02** Build React Flow canvas, draggable node palette and typed node configuration form.
-- [ ] **P3-03** Add condition branch handles and clear invalid-edge feedback; disallow cycles in client, but rely on server validator as authority.
-- [ ] **P3-04** Implement draft save with optimistic revision check, unsaved-changes warning, and server validation diagnostics.
-- [ ] **P3-05** Add publish confirmation/version metadata and manual trigger form.
-- [ ] **P3-06** Add execution view: per-node status, attempts, sanitized input/output, errors, execution timeline.
-- [ ] **P3-07** Subscribe to SSE using cursor reconnect, with polling fallback and loading/empty states.
-- [ ] **P3-08** Add Playwright E2E: create workflow → connect nodes → save → publish → run → observe completion.
+- [x] **P3-01** Create authenticated workspace shell with workflow list, create/rename/archive and role-aware actions.
+- [x] **P3-02** Build React Flow canvas, draggable node palette and typed node configuration form.
+- [x] **P3-03** Add condition branch handles and clear invalid-edge feedback; disallow cycles in client, but rely on server validator as authority.
+- [x] **P3-04** Implement draft save with optimistic revision check, unsaved-changes warning, and server validation diagnostics.
+- [x] **P3-05** Add publish confirmation/version metadata and manual trigger form.
+- [x] **P3-06** Add execution view: per-node status, attempts, sanitized input/output, errors, execution timeline.
+- [x] **P3-07** Subscribe to SSE using cursor reconnect, with polling fallback and loading/empty states.
+- [x] **P3-08** Add Playwright E2E: create workflow → connect nodes → save → publish → run → observe completion.
+
+**Phase 3 verification note (2026-10-08):** Playwright Chromium completed the signed-in editor browser flow and verified a viewer can inspect but cannot save or run. Light and dark screenshots were captured at mobile and desktop widths; no page overflow was observed at 375, 768, 1280, or 1440 pixels. Evidence: ignored `artifacts/e2e/phase3-studio/playwright.xml` and theme screenshots. The Phase 3 UI gate passes, with P2-06 still open as a prerequisite task.
 
 **Deliverable:** Demonstrable no-code loop with visual status updates and robust UI error states.
 

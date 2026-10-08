@@ -9,9 +9,13 @@ from typing import Any
 
 import httpx
 from dotenv import dotenv_values
+from orchestrator.engine import WorkflowExecution
 from sqlalchemy import text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
+from temporalio.client import Client
+from temporalio.common import WorkflowIDReusePolicy
+from temporalio.exceptions import WorkflowAlreadyStartedError
 
 BASE = "http://127.0.0.1:8000"
 ORIGIN = "http://localhost:3000"
@@ -142,6 +146,23 @@ async def main() -> None:
                 assert row[0] >= 1 and row[1] is not None
             scenarios.append("queued DB outbox survives API restart and worker absence")
 
+            temporal = await Client.connect(
+                "127.0.0.1:7233", namespace=str(config.get("TEMPORAL_NAMESPACE", "default"))
+            )
+            try:
+                await temporal.start_workflow(
+                    WorkflowExecution.run,
+                    queued_id,
+                    id=f"run:{queued_id}",
+                    task_queue=str(config.get("TEMPORAL_TASK_QUEUE", "automiq-bootstrap")),
+                    id_reuse_policy=WorkflowIDReusePolicy.REJECT_DUPLICATE,
+                )
+            except WorkflowAlreadyStartedError:
+                pass
+            else:
+                raise AssertionError("Duplicate Temporal start was accepted")
+            scenarios.append("Temporal rejects a duplicate start for the same run ID")
+
             await publish_config(failures_before_success=2)
             retry_id, _ = await start()
             retried = await wait_status(
@@ -176,7 +197,15 @@ async def main() -> None:
             )
             scenarios.append("permanent action failure terminates run without unbounded retry")
 
-            await publish_config(delay_seconds=6)
+            await publish_config(delay_seconds=6, timeout_seconds=1)
+            timed_out_id, _ = await start()
+            timed_out = await wait_status(
+                client, f"/api/v1/workspaces/{ws}/runs/{timed_out_id}", "failed", 60
+            )
+            assert timed_out["error"] == "external_error"
+            scenarios.append("action deadline terminates the run after bounded retries")
+
+            await publish_config(delay_seconds=6, timeout_seconds=10)
             restarted_id, _ = await start()
             restarted_path = f"/api/v1/workspaces/{ws}/runs/{restarted_id}"
             for _ in range(30):

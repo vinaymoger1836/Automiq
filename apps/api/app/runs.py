@@ -184,7 +184,8 @@ async def start_run(
 
 @router.get("/workspaces/{ws}/runs/{run_id}", response_model=RunOut)
 async def inspect_run(ws: uuid.UUID, run_id: uuid.UUID, db: Db, user: UserDep) -> RunOut:
-    await membership(db, ws, user, "read")
+    access = await membership(db, ws, user, "read")
+    viewer = access.role == "viewer"
     run = await scoped_run(db, ws, run_id)
     rows = await db.scalars(
         select(StepRun)
@@ -196,7 +197,7 @@ async def inspect_run(ws: uuid.UUID, run_id: uuid.UUID, db: Db, user: UserDep) -
         workflow_id=run.workflow_id,
         version_id=run.version_id,
         status=run.status,
-        input=redact(run.input_json),
+        input={"redacted": True} if viewer else redact(run.input_json),
         error=run.error,
         created_at=run.created_at,
         started_at=run.started_at,
@@ -206,7 +207,7 @@ async def inspect_run(ws: uuid.UUID, run_id: uuid.UUID, db: Db, user: UserDep) -
                 node_id=step.node_id,
                 attempt=step.attempt,
                 status=step.status,
-                output=redact(step.output_json),
+                output=None if viewer else redact(step.output_json),
                 error=step.error,
                 started_at=step.started_at,
                 finished_at=step.finished_at,
@@ -271,7 +272,10 @@ async def stream_events(
                 if allowed is None:
                     return
                 # Recheck membership so revocation also closes long-lived streams.
-                await membership(session, ws, user, "read")
+                try:
+                    access = await membership(session, ws, user, "read")
+                except HTTPException:
+                    return
                 rows = await session.scalars(
                     select(RunEvent)
                     .where(
@@ -288,7 +292,10 @@ async def stream_events(
                 )
             for event in batch:
                 cursor = event.id
-                data = json.dumps(redact(event.payload_json), separators=(",", ":"))
+                payload = redact(event.payload_json)
+                if access.role == "viewer":
+                    payload.pop("output", None)
+                data = json.dumps(payload, separators=(",", ":"))
                 yield f"id: {event.id}\nevent: {event.type}\ndata: {data}\n\n"
             if terminal in {"succeeded", "failed"} and not batch:
                 return

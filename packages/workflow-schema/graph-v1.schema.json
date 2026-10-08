@@ -1,0 +1,394 @@
+{
+  "$defs": {
+    "ConditionConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "expression": {
+          "$ref": "#/$defs/Expression"
+        }
+      },
+      "required": [
+        "expression"
+      ],
+      "title": "ConditionConfig",
+      "type": "object"
+    },
+    "ConditionNode": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "condition",
+          "title": "Type",
+          "type": "string"
+        },
+        "config": {
+          "$ref": "#/$defs/ConditionConfig"
+        },
+        "position": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Position"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "config"
+      ],
+      "title": "ConditionNode",
+      "type": "object"
+    },
+    "Edge": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "target": {
+          "title": "Target",
+          "type": "string"
+        },
+        "source_handle": {
+          "anyOf": [
+            {
+              "enum": [
+                "true",
+                "false"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Handle"
+        }
+      },
+      "required": [
+        "source",
+        "target"
+      ],
+      "title": "Edge",
+      "type": "object"
+    },
+    "EndConfig": {
+      "additionalProperties": false,
+      "properties": {},
+      "title": "EndConfig",
+      "type": "object"
+    },
+    "EndNode": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "end",
+          "title": "Type",
+          "type": "string"
+        },
+        "config": {
+          "$ref": "#/$defs/EndConfig"
+        },
+        "position": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Position"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "config"
+      ],
+      "title": "EndNode",
+      "type": "object"
+    },
+    "Expression": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "operator": {
+          "enum": [
+            "eq",
+            "ne",
+            "exists"
+          ],
+          "title": "Operator",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "required": [
+        "path",
+        "operator"
+      ],
+      "title": "Expression",
+      "type": "object"
+    },
+    "HttpConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "operation": {
+          "const": "mock",
+          "default": "mock",
+          "title": "Operation",
+          "type": "string"
+        },
+        "mock_output": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": "Mock Output",
+          "type": "object"
+        },
+        "failures_before_success": {
+          "default": 0,
+          "maximum": 2,
+          "minimum": 0,
+          "title": "Failures Before Success",
+          "type": "integer"
+        },
+        "permanent_failure": {
+          "default": false,
+          "title": "Permanent Failure",
+          "type": "boolean"
+        },
+        "delay_seconds": {
+          "default": 0,
+          "maximum": 6,
+          "minimum": 0,
+          "title": "Delay Seconds",
+          "type": "integer"
+        },
+        "timeout_seconds": {
+          "default": 10,
+          "maximum": 30,
+          "minimum": 1,
+          "title": "Timeout Seconds",
+          "type": "integer"
+        }
+      },
+      "title": "HttpConfig",
+      "type": "object"
+    },
+    "HttpNode": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "action.http",
+          "title": "Type",
+          "type": "string"
+        },
+        "config": {
+          "$ref": "#/$defs/HttpConfig"
+        },
+        "position": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Position"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "config"
+      ],
+      "title": "HttpNode",
+      "type": "object"
+    },
+    "ManualConfig": {
+      "additionalProperties": false,
+      "properties": {},
+      "title": "ManualConfig",
+      "type": "object"
+    },
+    "ManualNode": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "trigger.manual",
+          "title": "Type",
+          "type": "string"
+        },
+        "config": {
+          "$ref": "#/$defs/ManualConfig"
+        },
+        "position": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Position"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "config"
+      ],
+      "title": "ManualNode",
+      "type": "object"
+    },
+    "Position": {
+      "additionalProperties": false,
+      "properties": {
+        "x": {
+          "maximum": 10000,
+          "minimum": -10000,
+          "title": "X",
+          "type": "number"
+        },
+        "y": {
+          "maximum": 10000,
+          "minimum": -10000,
+          "title": "Y",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y"
+      ],
+      "title": "Position",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "nodes": {
+      "items": {
+        "discriminator": {
+          "mapping": {
+            "action.http": "#/$defs/HttpNode",
+            "condition": "#/$defs/ConditionNode",
+            "end": "#/$defs/EndNode",
+            "trigger.manual": "#/$defs/ManualNode"
+          },
+          "propertyName": "type"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/ManualNode"
+          },
+          {
+            "$ref": "#/$defs/HttpNode"
+          },
+          {
+            "$ref": "#/$defs/ConditionNode"
+          },
+          {
+            "$ref": "#/$defs/EndNode"
+          }
+        ]
+      },
+      "maxItems": 100,
+      "minItems": 1,
+      "title": "Nodes",
+      "type": "array"
+    },
+    "edges": {
+      "items": {
+        "$ref": "#/$defs/Edge"
+      },
+      "maxItems": 150,
+      "title": "Edges",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "nodes",
+    "edges"
+  ],
+  "title": "Graph",
+  "type": "object"
+}

@@ -22,6 +22,7 @@ class HttpConfig(StrictModel):
     failures_before_success: int = Field(default=0, ge=0, le=2)
     permanent_failure: bool = False
     delay_seconds: int = Field(default=0, ge=0, le=6)
+    timeout_seconds: int = Field(default=10, ge=1, le=30)
 
 
 class Expression(StrictModel):
