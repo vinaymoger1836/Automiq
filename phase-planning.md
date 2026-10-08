@@ -98,12 +98,14 @@ At Phase 0, create a root `AGENTS.md` that references these two documents, summa
 - [x] **P2-03** Implement atomic DB run creation + outbox and an idempotent Temporal starter/reconciler using `workflow_id=run:<uuid>`.
 - [x] **P2-04** Implement deterministic Temporal workflow for sequential DAG traversal, conditions, node dispatch, completion/failure transitions.
 - [x] **P2-05** Add action activity contract: timeout, retry classification, bounded output, stable side-effect key, structured result.
-- [ ] **P2-06** Implement deterministic mock HTTP/action adapter and a restricted real HTTP connector with egress controls; keep disabled by default until security tests pass.
+- [x] **P2-06** Implement deterministic mock HTTP/action adapter and a restricted real HTTP connector with egress controls; keep disabled by default until security tests pass.
 - [x] **P2-07** Persist idempotent step/run projections and monotonic `run_events` with correlation IDs.
 - [x] **P2-08** Add run inspect endpoint and resumable SSE `Last-Event-ID` stream with heartbeat/polling fallback.
 - [x] **P2-09** Add Temporal testing environment cases for retry, crash/replay, timeout, permanent failure, and duplicate start.
 
 **Phase 2 verification note (2026-10-08):** Full local API/PostgreSQL/Temporal E2E passed five run-flow scenarios and six fault scenarios, including API restart after queued outbox insert, worker restart, bounded retry/timeout, permanent failure, and duplicate Temporal start rejection. P2-09's isolated Temporal test-environment wording was replaced by fault injection against the full Compose stack under `AGENTS.md` §6. Evidence: ignored `artifacts/e2e/phase2-runs/report.json` and `artifacts/e2e/phase2-faults/report.json`. P2-06 remains open: the deterministic mock is implemented, while the restricted real HTTP connector and its egress tests are not. Phase 2 is therefore not fully complete.
+
+**P2-06 completion note (2026-10-08):** The real connector is limited to HTTPS GET at one server-configured origin, is disabled by default, pins a DNS-validated address, verifies TLS for the original host, refuses redirects, and persists only selected boolean/numeric/null fields. Full local API/PostgreSQL/Temporal/fake-TLS-provider E2E passed six scenarios; separate full-stack checks passed for metadata-range DNS rejection and disabled-by-default publication denial. Evidence: ignored `artifacts/e2e/phase2-http/`. The earlier Phase 2 note records the state before this task. Production deployments still need network-layer egress policy; no production security claim is made.
 
 **Deliverable:** `trigger.manual → action.mock → condition → end` runs end-to-end and streams progress. A restarted worker resumes without silently dropping runs.
 
@@ -124,7 +126,7 @@ At Phase 0, create a root `AGENTS.md` that references these two documents, summa
 - [x] **P3-07** Subscribe to SSE using cursor reconnect, with polling fallback and loading/empty states.
 - [x] **P3-08** Add Playwright E2E: create workflow → connect nodes → save → publish → run → observe completion.
 
-**Phase 3 verification note (2026-10-08):** Playwright Chromium completed the signed-in editor browser flow and verified a viewer can inspect but cannot save or run. Light and dark screenshots were captured at mobile and desktop widths; no page overflow was observed at 375, 768, 1280, or 1440 pixels. Evidence: ignored `artifacts/e2e/phase3-studio/playwright.xml` and theme screenshots. The Phase 3 UI gate passes, with P2-06 still open as a prerequisite task.
+**Phase 3 verification note (2026-10-08):** Playwright Chromium completed the signed-in editor browser flow and verified a viewer can inspect but cannot save or run. Light and dark screenshots were captured at mobile and desktop widths; no page overflow was observed at 375, 768, 1280, or 1440 pixels. Evidence: ignored `artifacts/e2e/phase3-studio/playwright.xml` and theme screenshots. The Phase 3 UI gate passes; P2-06 was subsequently completed as recorded above.
 
 **Deliverable:** Demonstrable no-code loop with visual status updates and robust UI error states.
 

@@ -16,13 +16,42 @@ class ManualConfig(StrictModel):
 
 
 class HttpConfig(StrictModel):
-    # Phase 2 executes the deterministic mock adapter. Real egress is disabled.
-    operation: Literal["mock"] = "mock"
+    operation: Literal["mock", "https_get"] = "mock"
     mock_output: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
     failures_before_success: int = Field(default=0, ge=0, le=2)
     permanent_failure: bool = False
     delay_seconds: int = Field(default=0, ge=0, le=6)
     timeout_seconds: int = Field(default=10, ge=1, le=30)
+    path: str | None = Field(default=None, max_length=160)
+    response_fields: list[str] = Field(default_factory=list, max_length=10)
+
+    @model_validator(mode="after")
+    def valid_operation(self) -> "HttpConfig":
+        if self.operation == "https_get":
+            if not self.path or not re.fullmatch(
+                r"/(?:[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*)?", self.path
+            ):
+                raise ValueError("HTTPS GET requires a simple relative path")
+            if (
+                self.mock_output
+                or self.failures_before_success
+                or self.permanent_failure
+                or self.delay_seconds
+            ):
+                raise ValueError("HTTPS GET cannot include mock behavior")
+            if len(set(self.response_fields)) != len(self.response_fields) or any(
+                not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,39}", field)
+                or field == "http_status"
+                or any(
+                    word in field.lower()
+                    for word in ("secret", "token", "password", "credential", "authorization")
+                )
+                for field in self.response_fields
+            ):
+                raise ValueError("Response fields must be unique non-sensitive scalar keys")
+        elif self.path is not None or self.response_fields:
+            raise ValueError("Mock action cannot specify an HTTPS request")
+        return self
 
 
 class Expression(StrictModel):

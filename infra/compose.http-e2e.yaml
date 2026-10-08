@@ -1,0 +1,32 @@
+# Local-only fake HTTPS provider overlay. Prepare ignored TLS files first.
+services:
+  api:
+    environment:
+      APP_ENV: test
+      HTTP_CONNECTOR_ENABLED: "true"
+      HTTP_CONNECTOR_ORIGIN: ${P2_HTTP_ORIGIN-https://fake-provider:8443}
+      HTTP_CONNECTOR_TEST_PRIVATE_HOST: ${P2_HTTP_TEST_PRIVATE_HOST-fake-provider}
+      HTTP_CONNECTOR_TEST_CA_FILE: /test-tls/cert.crt
+    volumes:
+      - ../artifacts/e2e/phase2-http/tls:/test-tls:ro
+  worker:
+    environment:
+      APP_ENV: test
+      HTTP_CONNECTOR_ENABLED: "true"
+      HTTP_CONNECTOR_ORIGIN: ${P2_HTTP_ORIGIN-https://fake-provider:8443}
+      HTTP_CONNECTOR_TEST_PRIVATE_HOST: ${P2_HTTP_TEST_PRIVATE_HOST-fake-provider}
+      HTTP_CONNECTOR_TEST_CA_FILE: /test-tls/cert.crt
+    volumes:
+      - ../artifacts/e2e/phase2-http/tls:/test-tls:ro
+    extra_hosts:
+      - metadata-e2e:169.254.169.254
+  fake-provider:
+    build: { context: .., dockerfile: services/orchestrator/Dockerfile }
+    command: ["uv", "run", "--frozen", "--no-dev", "python", "/app/scripts/fake_https_provider.py"]
+    volumes:
+      - ../artifacts/e2e/phase2-http/tls:/test-tls:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.create_connection(('localhost',8443),2); s.close()"]
+      interval: 3s
+      timeout: 3s
+      retries: 20

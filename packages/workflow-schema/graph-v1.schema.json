@@ -177,8 +177,11 @@
       "additionalProperties": false,
       "properties": {
         "operation": {
-          "const": "mock",
           "default": "mock",
+          "enum": [
+            "mock",
+            "https_get"
+          ],
           "title": "Operation",
           "type": "string"
         },
@@ -230,6 +233,27 @@
           "minimum": 1,
           "title": "Timeout Seconds",
           "type": "integer"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "response_fields": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 10,
+          "title": "Response Fields",
+          "type": "array"
         }
       },
       "title": "HttpConfig",

@@ -1,6 +1,6 @@
 # Automiq
 
-Automiq is a versioned workflow automation engine. The current local slice lets a signed-in user create a workspace, draw and publish a workflow, run it through Temporal, and inspect its progress. PostgreSQL holds workspace and run state; Redis and Temporal are local Compose services. The HTTP action uses a deterministic mock adapter. Real HTTP egress is not enabled.
+Automiq is a versioned workflow automation engine. The current local slice lets a signed-in user create a workspace, draw and publish a workflow, run it through Temporal, and inspect its progress. PostgreSQL holds workspace and run state; Redis and Temporal are local Compose services. HTTP actions use a deterministic mock by default; an operator can opt in to one restricted HTTPS GET destination.
 
 ## Requirements
 
@@ -43,10 +43,16 @@ docker compose --env-file .env -f infra/compose.yaml exec -T api uv run --frozen
 
 Set `UV_CACHE_DIR` to any writable local directory if the default cache is inaccessible. The Phase 2 fault script intentionally stops and starts the local API and worker; do not run it against a shared environment. Reports and theme/viewport screenshots are saved under the Git-ignored `artifacts/e2e/`. See [the runbook](docs/runbook.md) for recovery and evidence details.
 
+### Restricted HTTPS GET
+
+Set `HTTP_CONNECTOR_ENABLED=true` and `HTTP_CONNECTOR_ORIGIN=https://api.example.com` in the local, ignored `.env` only when you intend to allow requests to that named HTTPS host. Restart both API and worker. Workflow authors provide only a simple relative path and up to ten named boolean, numeric, or null response fields. The worker rejects unsafe DNS answers, verifies TLS for the configured hostname, refuses redirects, and caps response size and time. No credentials or arbitrary URLs belong in the graph. GET requests may be repeated by Temporal after a transient failure; providers should treat them as read-only. A production deployment also needs network-level egress controls.
+
+The repeatable fake-provider security E2E, its setup and teardown commands, and ignored evidence paths are in the [runbook](docs/runbook.md). Normal Compose startup leaves this connector disabled.
+
 ## Current boundaries
 
 - The [API](apps/api/app/main.py) handles identity, workspace authorization, workflow definitions, and read APIs. Browser mutations use a signed session and CSRF token.
-- The [worker](services/orchestrator/orchestrator/worker.py) starts queued runs from a database outbox. Temporal workflow code is deterministic; database writes and mock actions execute in activities.
+- The [worker](services/orchestrator/orchestrator/worker.py) starts queued runs from a database outbox. Temporal workflow code is deterministic; database writes, mock actions, and restricted HTTPS requests execute in activities.
 - The [studio](apps/web/src/app/studio/page.tsx) supports light and dark themes, keyboard-accessible forms, and mobile layouts. The server remains the authority for graph validation and workspace permissions.
 - Runs pin an immutable published version. Mock action effects use a stable key so retries can be reconciled. External exactly-once effects are not claimed.
 

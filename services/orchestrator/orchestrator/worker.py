@@ -12,7 +12,12 @@ from temporalio.common import WorkflowIDReusePolicy
 from temporalio.exceptions import WorkflowAlreadyStartedError
 from temporalio.worker import Worker
 
-from orchestrator.activities import execute_mock_action, load_run, project_event
+from orchestrator.activities import (
+    execute_https_action,
+    execute_mock_action,
+    load_run,
+    project_event,
+)
 from orchestrator.engine import WorkflowExecution
 
 
@@ -43,7 +48,13 @@ async def main() -> None:
         client,
         task_queue=settings.temporal_task_queue,
         workflows=[BootstrapCheck, WorkflowExecution],
-        activities=[check_postgres, load_run, project_event, execute_mock_action],
+        activities=[
+            check_postgres,
+            load_run,
+            project_event,
+            execute_mock_action,
+            execute_https_action,
+        ],
     )
     async with asyncio.TaskGroup() as tasks:
         tasks.create_task(worker.run())

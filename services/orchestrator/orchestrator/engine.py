@@ -91,8 +91,13 @@ class WorkflowExecution:
                 result = trigger
             elif kind == "action.http":
                 try:
+                    activity_name = (
+                        "execute_https_action"
+                        if node["config"].get("operation") == "https_get"
+                        else "execute_mock_action"
+                    )
                     action: dict[str, Any] = await workflow.execute_activity(
-                        "execute_mock_action",
+                        activity_name,
                         {"run_id": run_id, "node_id": current, "config": node["config"]},
                         start_to_close_timeout=timedelta(
                             seconds=node["config"].get("timeout_seconds", 10)
@@ -100,13 +105,14 @@ class WorkflowExecution:
                         retry_policy=ACTION_RETRY,
                     )
                 except ActivityError:
-                    await project(
-                        run_id,
-                        "step.failed",
-                        f"{current}:terminal-failed",
-                        node_id=current,
-                        error="external_error",
-                    )
+                    if node["config"].get("operation") != "https_get":
+                        await project(
+                            run_id,
+                            "step.failed",
+                            f"{current}:terminal-failed",
+                            node_id=current,
+                            error="external_error",
+                        )
                     await project(run_id, "run.failed", "run:failed", error="external_error")
                     return "failed"
                 result = action["output"]

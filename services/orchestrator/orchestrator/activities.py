@@ -13,6 +13,7 @@ from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
 
+
 @activity.defn(name="load_run")
 async def load_run(run_id: str) -> dict[str, Any]:
     async with session_factory()() as db:
@@ -150,3 +151,44 @@ async def execute_mock_action(command: dict[str, Any]) -> dict[str, Any]:
             non_retryable=config.permanent_failure,
         )
     return {"output": config.mock_output, "attempts": attempts}
+
+
+@activity.defn(name="execute_https_action")
+async def execute_https_action(command: dict[str, Any]) -> dict[str, Any]:
+    # Keep network-client imports out of Temporal's deterministic workflow sandbox.
+    from orchestrator.http_connector import HttpActionError, execute_https_get
+
+    try:
+        config = HttpConfig.model_validate(command["config"])
+    except ValidationError:
+        raise ApplicationError("Action configuration is invalid", non_retryable=True) from None
+    attempt = activity.info().attempt
+    try:
+        output = await execute_https_get(config)
+    except HttpActionError as exc:
+        run_id = str(command["run_id"])
+        node_id = str(command["node_id"])
+        await project_event(
+            {
+                "run_id": run_id,
+                "type": "step.failed",
+                "event_key": f"{node_id}:failed:{attempt}",
+                "node_id": node_id,
+                "attempt": attempt,
+                "error": exc.code,
+            }
+        )
+        if exc.retryable and attempt < 3:
+            await project_event(
+                {
+                    "run_id": run_id,
+                    "type": "step.running",
+                    "event_key": f"{node_id}:running:{attempt + 1}",
+                    "node_id": node_id,
+                    "attempt": attempt + 1,
+                }
+            )
+        raise ApplicationError(
+            "HTTPS action failed", type=exc.code, non_retryable=not exc.retryable
+        ) from None
+    return {"output": output, "attempts": attempt}

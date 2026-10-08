@@ -46,6 +46,10 @@ test("editor builds, publishes, runs, and viewer inspects a workflow", async ({ 
   await expect(page.getByRole("heading", { name: "Review intake" })).toBeVisible();
 
   await page.getByRole("button", { name: /HTTP action Mock action/ }).click();
+  await page.getByLabel("Action mode").selectOption("https_get");
+  await expect(page.getByLabel("Request path")).toBeVisible();
+  await expect(page.getByLabel("Numeric or boolean response fields")).toHaveValue("ok");
+  await page.getByLabel("Action mode").selectOption("mock");
   await page.getByRole("button", { name: "Remove connection start to end" }).click();
   await page.getByRole("combobox", { name: "From node" }).selectOption("start");
   await page.getByRole("combobox", { name: "To node" }).selectOption("action_1");

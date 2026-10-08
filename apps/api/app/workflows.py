@@ -11,10 +11,26 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from app.auth import Db, UserDep, membership, require_csrf
+from app.config import get_settings
 from app.graph import EMPTY_GRAPH, Diagnostic, Graph, validate_graph
 from app.models import AuditLog, Membership, User, Workflow, WorkflowVersion, Workspace
 
 router = APIRouter(prefix="/api/v1", tags=["workflows"])
+
+
+def runnable_diagnostics(graph: Graph) -> list[Diagnostic]:
+    diagnostics = validate_graph(graph)
+    if not get_settings().http_connector_enabled:
+        diagnostics.extend(
+            Diagnostic(
+                code="http_connector_disabled",
+                message="HTTPS GET connector is disabled for this environment",
+                node_id=node.id,
+            )
+            for node in graph.nodes
+            if node.type == "action.http" and node.config.operation == "https_get"
+        )
+    return diagnostics
 
 
 class WorkspaceCreate(BaseModel):
@@ -334,7 +350,7 @@ async def validate_draft(
     require_csrf(request)
     await membership(db, ws, user, "write")
     await scoped_workflow(db, ws, workflow_id)
-    diagnostics = validate_graph(graph)
+    diagnostics = runnable_diagnostics(graph)
     return ValidationOut(valid=not diagnostics, diagnostics=diagnostics)
 
 
@@ -359,7 +375,7 @@ async def publish(
     if workflow.status != "active" or workflow.draft_revision != body.revision:
         raise HTTPException(status_code=409, detail="Archived workflow or draft revision conflict")
     graph = Graph.model_validate(workflow.draft_graph)
-    diagnostics = validate_graph(graph)
+    diagnostics = runnable_diagnostics(graph)
     if diagnostics:
         raise HTTPException(status_code=422, detail=[item.model_dump() for item in diagnostics])
     canonical = json.dumps(graph.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
