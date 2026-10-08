@@ -1,4 +1,7 @@
+from functools import lru_cache
+
 from sqlalchemy import MetaData
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
 
@@ -11,4 +14,13 @@ class Base(DeclarativeBase):
             "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
             "pk": "pk_%(table_name)s",
         }
+    )
+
+
+@lru_cache
+def session_factory() -> async_sessionmaker[AsyncSession]:
+    from app.config import get_settings
+
+    return async_sessionmaker(
+        create_async_engine(get_settings().database_url), expire_on_commit=False
     )
