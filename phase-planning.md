@@ -57,7 +57,7 @@ At Phase 0, create a root `AGENTS.md` that references these two documents, summa
 - [x] **P0-06** Add CI for lint, type check, tests, and frontend production build; secret scan and dependency scan.
 - [x] **P0-07** Write ADRs 001–005 stubs, development runbook, and a reproducible one-command startup/smoke test.
 
-**Phase 0 verification note (2026-10-08):** P0-03's routine component-test obligation was replaced by a full-stack Playwright E2E check under `AGENTS.md` §6. Local Compose startup, Temporal/PostgreSQL smoke, browser E2E, static checks, production build, and dependency audits passed. The CI workflow exists, but its green status and the fresh-clone gate cannot be observed before a user-authorized commit and CI run. The Git repository has no commits. No Phase 1 work has started.
+**Phase 0 verification note (2026-10-08):** P0-03's routine component-test obligation was replaced by a full-stack Playwright E2E check under `AGENTS.md` §6. Local Compose startup, Temporal/PostgreSQL smoke, browser E2E, static checks, production build, and dependency audits passed. At the Phase 0 handoff, the CI workflow existed but its green status and the fresh-clone gate had not been observed; no Phase 1 work had started.
 
 **Deliverable:** `docker compose up --build` starts local services; web displays health; API/worker connect to Temporal; no real external service keys needed.
 
@@ -69,7 +69,7 @@ At Phase 0, create a root `AGENTS.md` that references these two documents, summa
 
 ### Tasks
 
-- [ ] **P1-01** Design tables: users, workspaces, memberships, workflows, workflow_versions, audit_logs; add Alembic migrations/indexes.
+- [x] **P1-01** Design tables: users, workspaces, memberships, workflows, workflow_versions, audit_logs; add Alembic migrations/indexes.
 - [ ] **P1-02** Integrate vetted OIDC/session authentication; development test identity is isolated to local/test environment.
 - [ ] **P1-03** Build membership middleware/services (`owner`, `editor`, `viewer`) with explicit permission matrix.
 - [ ] **P1-04** Implement `GET /me` and workspace create/list endpoints; cross-tenant negative tests.
@@ -78,6 +78,8 @@ At Phase 0, create a root `AGENTS.md` that references these two documents, summa
 - [ ] **P1-07** Implement workflow draft CRUD with optimistic concurrency / conflict response.
 - [ ] **P1-08** Implement publish transaction: validate, increment version, persist immutable graph, compute checksum, atomically update pointer.
 - [ ] **P1-09** Add OpenAPI contract checks, unit tests for malformed graphs and permissions, schema compatibility tests.
+
+**P1-01 verification note (2026-10-08):** Revision `0001_phase1_core` applied to local PostgreSQL. `alembic check` found no metadata drift. The schema E2E check passed five integrity cases with synthetic rows and verified full rollback; its JSON report is under ignored `artifacts/e2e/phase1-schema/`. Authentication, workspace API authorization, graph validation, and published-version immutability enforcement remain in later Phase 1 tasks.
 
 **Deliverable:** Authenticated editor can create a workspace, save a draft and publish version 1. Viewer cannot mutate. Existing versions remain byte-stable after draft changes.
 

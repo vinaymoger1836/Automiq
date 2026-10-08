@@ -28,6 +28,9 @@ jobs:
       - uses: actions/checkout@v4
       - run: cp .env.example .env
       - run: docker compose --env-file .env -f infra/compose.yaml up -d --build
+      - run: docker compose --env-file .env -f infra/compose.yaml exec -T api uv run --frozen --no-dev alembic -c alembic.ini upgrade head
+      - run: docker compose --env-file .env -f infra/compose.yaml exec -T api uv run --frozen --no-dev alembic -c alembic.ini check
+      - run: docker compose --env-file .env -f infra/compose.yaml exec -T api uv run --frozen --no-dev python /app/scripts/check_phase1_schema.py
       - run: docker compose --env-file .env -f infra/compose.yaml exec -T worker uv run --frozen --no-dev python /app/scripts/smoke.py
       - uses: actions/setup-node@v4
         with: { node-version: '22' }

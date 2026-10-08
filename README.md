@@ -22,6 +22,17 @@ Open the [web dashboard](http://localhost:3000), [API readiness](http://localhos
 
 Run the full PowerShell startup and smoke shortcut with `./scripts/smoke.ps1`. Use `docker compose --env-file .env -f infra/compose.yaml down` to stop services. Volumes persist; deleting them removes local data.
 
+### Phase 1 schema
+
+After starting Compose, apply the additive business-schema migration:
+
+```powershell
+docker compose --env-file .env -f infra/compose.yaml exec -T api uv run --frozen --no-dev alembic -c alembic.ini upgrade head
+docker compose --env-file .env -f infra/compose.yaml exec -T api uv run --frozen --no-dev python /app/scripts/check_phase1_schema.py
+```
+
+The schema check inserts synthetic records inside a transaction and rolls them back. See [migration notes](infra/migrations/README.md) for rollback limits. Authentication and workspace APIs are not yet available.
+
 ## Checks
 
 ```powershell
