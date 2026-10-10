@@ -51,7 +51,12 @@ class BootstrapCheck:
 
 
 async def main() -> None:
+    from app.observability import close_tracing, configure_tracing
+    from prometheus_client import start_http_server
+
     settings = get_settings()
+    configure_tracing("automiq-worker", settings.otel_exporter_otlp_endpoint)
+    start_http_server(9465, addr="0.0.0.0")
     client = await Client.connect(settings.temporal_address, namespace=settings.temporal_namespace)
     worker = Worker(
         client,
@@ -70,14 +75,19 @@ async def main() -> None:
             create_scheduled_run,
         ],
     )
-    async with asyncio.TaskGroup() as tasks:
-        tasks.create_task(worker.run())
-        tasks.create_task(reconcile_outbox(client))
-        tasks.create_task(reconcile_schedules(client))
-        tasks.create_task(reconcile_approval_signals(client))
+    try:
+        async with asyncio.TaskGroup() as tasks:
+            tasks.create_task(worker.run())
+            tasks.create_task(reconcile_outbox(client))
+            tasks.create_task(reconcile_schedules(client))
+            tasks.create_task(reconcile_approval_signals(client))
+    finally:
+        close_tracing()
 
 
 async def reconcile_outbox(client: Client) -> None:
+    from app.observability import event
+
     settings = get_settings()
     while True:
         async with session_factory()() as db:
@@ -109,11 +119,14 @@ async def reconcile_outbox(client: Client) -> None:
                     except WorkflowAlreadyStartedError:
                         outbox.started_at = datetime.now(UTC)
                         outbox.last_error = None
+                        event(logger, "run.start_reconciled", run_id=str(run.id))
                     except Exception:
                         outbox.last_error = "temporal_start_unavailable"
+                        event(logger, "run.start_deferred", run_id=str(run.id))
                     else:
                         outbox.started_at = datetime.now(UTC)
                         outbox.last_error = None
+                        event(logger, "run.started", run_id=str(run.id))
         await asyncio.sleep(2)
 
 

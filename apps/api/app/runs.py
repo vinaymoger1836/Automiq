@@ -16,7 +16,9 @@ from sqlalchemy.exc import IntegrityError
 from starlette.responses import StreamingResponse
 
 from app.auth import Db, UserDep, membership, require_csrf
+from app.config import get_settings
 from app.db import session_factory
+from app.limits import admit_request, workspace_has_capacity
 from app.models import RunEvent, RunStartOutbox, StepRun, Workflow, WorkflowRun, WorkflowVersion
 
 router = APIRouter(prefix="/api/v1", tags=["runs"])
@@ -149,6 +151,9 @@ async def start_run(
         return RunAccepted(
             run_id=existing.id, status=existing.status, version_id=existing.version_id
         )
+    await admit_request("manual", ws, get_settings().manual_runs_per_minute)
+    if not await workspace_has_capacity(db, ws):
+        raise HTTPException(status_code=429, detail="Workspace active run limit exceeded")
     run_id = uuid.uuid4()
     run = WorkflowRun(
         id=run_id,

@@ -13,6 +13,7 @@ from temporalio.client import Client
 from app.auth import Db, UserDep, membership, require_csrf
 from app.config import get_settings
 from app.models import Approval, AuditLog, RunEvent, WorkflowRun
+from app.observability import APPROVAL_WAIT
 
 router = APIRouter(prefix="/api/v1", tags=["approvals"])
 logger = logging.getLogger(__name__)
@@ -107,6 +108,7 @@ async def decide_approval(
     )
     await db.commit()
     await db.refresh(row)
+    APPROVAL_WAIT.observe(max(0.0, (now - row.created_at).total_seconds()))
     # The worker retries unsent signals if the API or Temporal connection fails here.
     try:
         settings = get_settings()

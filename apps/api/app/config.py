@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     openai_input_usd_per_million: int = Field(default=0, ge=0)
     openai_output_usd_per_million: int = Field(default=0, ge=0)
     otel_exporter_otlp_endpoint: str = ""
+    metrics_token: SecretStr = SecretStr("")
+    manual_runs_per_minute: int = Field(default=60, ge=1, le=10000)
+    github_webhooks_per_minute: int = Field(default=120, ge=1, le=10000)
+    workspace_active_run_limit: int = Field(default=25, ge=1, le=10000)
+    run_detail_retention_days: int = Field(default=30, ge=1)
+    run_summary_retention_days: int = Field(default=90, ge=2)
     oidc_issuer: str = ""
     oidc_client_id: str = ""
     oidc_client_secret: SecretStr = SecretStr("")
@@ -41,6 +47,10 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def production_auth_config(self) -> "Settings":
+        if self.run_summary_retention_days <= self.run_detail_retention_days:
+            raise ValueError("Summary retention must exceed detail retention")
+        if self.app_env == "production" and not self.metrics_token.get_secret_value():
+            raise ValueError("Production requires a metrics scrape token")
         if self.llm_provider_mode not in {"fake", "openai"} or (
             self.llm_provider_mode == "fake" and self.app_env not in {"development", "test"}
         ):

@@ -1,4 +1,7 @@
 import asyncio
+import hmac
+import logging
+import time
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -6,6 +9,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from opentelemetry import trace
+from opentelemetry.propagate import extract
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel
 from redis.asyncio import Redis
 from sqlalchemy import text
@@ -18,6 +24,13 @@ from app.approvals import router as approvals_router
 from app.auth import router as auth_router
 from app.config import get_settings
 from app.integrations import router as integrations_router
+from app.observability import (
+    HTTP_DURATION,
+    HTTP_REQUESTS,
+    close_tracing,
+    configure_tracing,
+    event,
+)
 from app.runs import router as runs_router
 from app.workflows import router as workflows_router
 
@@ -29,12 +42,15 @@ class HealthResponse(BaseModel):
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    get_settings()
+    settings = get_settings()
+    configure_tracing("automiq-api", settings.otel_exporter_otlp_endpoint)
     yield
+    close_tracing()
 
 
 app = FastAPI(title="Automiq Control Plane", lifespan=lifespan)
 settings = get_settings()
+logger = logging.getLogger(__name__)
 app.add_middleware(
     SessionMiddleware,
     secret_key=settings.session_secret.get_secret_value(),
@@ -60,9 +76,40 @@ app.include_router(approvals_router)
 @app.middleware("http")
 async def request_id(request: Request, call_next):  # type: ignore[no-untyped-def]
     request.state.request_id = str(uuid.uuid4())
-    response = await call_next(request)
-    response.headers["X-Request-ID"] = request.state.request_id
-    return response
+    started = time.perf_counter()
+    status = 500
+    context = extract(dict(request.headers))
+    with trace.get_tracer(__name__).start_as_current_span("http.request", context=context) as span:
+        span.set_attribute("http.request.method", request.method)
+        span.set_attribute("request.id", request.state.request_id)
+        try:
+            response = await call_next(request)
+            status = response.status_code
+            response.headers["X-Request-ID"] = request.state.request_id
+            return response
+        finally:
+            route = request.scope.get("route")
+            template = getattr(route, "path", "unmatched")
+            span.set_attribute("http.route", template)
+            span.set_attribute("http.response.status_code", status)
+            HTTP_REQUESTS.labels(request.method, template, str(status)).inc()
+            HTTP_DURATION.labels(request.method, template).observe(time.perf_counter() - started)
+            event(
+                logger,
+                "http.request",
+                request_id=request.state.request_id,
+                method=request.method,
+                route=template,
+                status=status,
+            )
+
+
+@app.get("/internal/metrics", include_in_schema=False)
+async def metrics(request: Request) -> Response:
+    token = settings.metrics_token.get_secret_value()
+    if not token or not hmac.compare_digest(request.headers.get("x-metrics-token", ""), token):
+        raise HTTPException(status_code=404, detail="Not found")
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.exception_handler(HTTPException)
@@ -78,6 +125,7 @@ async def http_error(request: Request, exc: HTTPException) -> JSONResponse:
     detail = exc.detail
     return JSONResponse(
         status_code=exc.status_code,
+        headers=exc.headers,
         content={
             "error": {
                 "code": code,

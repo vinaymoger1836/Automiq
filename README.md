@@ -57,6 +57,10 @@ The [Phase 4 guide](docs/phase4.md) covers credential setup, webhook binding, Te
 
 The [Phase 5 guide](docs/phase5.md) covers the bounded LangGraph agent, encrypted issue input, approval inbox and signals, model configuration, and reproducible fake-provider E2E commands. The local gate used no paid LLM or live external provider calls.
 
+### Phase 6 operations
+
+The [Phase 6 guide](docs/phase6.md) covers metrics and traces, run admission limits, retention dry runs, and the synthetic full-stack operations check. `/internal/metrics` requires a configured scrape token; run detail and summary cleanup requires an explicit `--apply`.
+
 ## Current boundaries
 
 - The [API](apps/api/app/main.py) handles identity, workspace authorization, workflow definitions, and read APIs. Browser mutations use a signed session and CSRF token.
@@ -64,4 +68,4 @@ The [Phase 5 guide](docs/phase5.md) covers the bounded LangGraph agent, encrypte
 - The [studio](apps/web/src/app/studio/page.tsx) supports light and dark themes, keyboard-accessible forms, and mobile layouts. The server remains the authority for graph validation and workspace permissions.
 - Runs pin an immutable published version. Mock action effects use a stable key so retries can be reconciled. External exactly-once effects are not claimed.
 
-See [architecture.md](architecture.md), [phase-planning.md](phase-planning.md), and [migration notes](infra/migrations/README.md). No commit or push is performed by the engineering agent.
+See [architecture.md](architecture.md) and [migration notes](infra/migrations/README.md). `phase-planning.md` is a local ignored planning file. No commit or push is performed by the engineering agent.

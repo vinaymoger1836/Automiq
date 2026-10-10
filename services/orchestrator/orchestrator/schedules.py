@@ -31,6 +31,8 @@ logger = logging.getLogger(__name__)
 
 @activity.defn(name="create_scheduled_run")
 async def create_scheduled_run(command: dict[str, str]) -> str | None:
+    from app.limits import workspace_has_capacity
+
     trigger_id = uuid.UUID(command["trigger_id"])
     fire_id = command["fire_id"]
     if not fire_id.startswith(f"schedule-fire:{trigger_id}-") or len(fire_id) > 119:
@@ -54,6 +56,9 @@ async def create_scheduled_run(command: dict[str, str]) -> str | None:
         )
         if existing is not None:
             return str(existing.id)
+        if not await workspace_has_capacity(db, workspace_id):
+            logger.warning("schedule skipped at active run limit: trigger_id=%s", trigger_id)
+            return None
         run_id = uuid.uuid4()
         input_json = {"payload": {"scheduled_at": command["started_at"]}}
         db.add(

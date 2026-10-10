@@ -1,6 +1,7 @@
 """Database projections and deterministic mock action side effects."""
 
 import asyncio
+import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -20,6 +21,8 @@ from pydantic import ValidationError
 from sqlalchemy import func, select
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
+
+logger = logging.getLogger(__name__)
 
 
 @activity.defn(name="load_run")
@@ -44,6 +47,10 @@ async def load_run(run_id: str) -> dict[str, Any]:
 
 @activity.defn(name="project_event")
 async def project_event(command: dict[str, Any]) -> None:
+    from opentelemetry import trace
+
+    from app.observability import STEP_DURATION, WORKFLOW_DURATION, WORKFLOW_RUNS, event
+
     run_id = uuid.UUID(command["run_id"])
     kind = command["type"]
     async with session_factory()() as db:
@@ -61,6 +68,17 @@ async def project_event(command: dict[str, Any]) -> None:
         attempt = command.get("attempt", 1)
         output = command.get("output")
         error = command.get("error")
+        finished_at = datetime.now(UTC)
+        terminal_run = kind in {"run.succeeded", "run.failed"} and run.status not in {
+            "succeeded",
+            "failed",
+        }
+        run_duration = (
+            max(0.0, (finished_at - run.started_at).total_seconds())
+            if terminal_run and run.started_at is not None
+            else None
+        )
+        step_duration: float | None = None
         if kind == "run.started" and run.status == "queued":
             run.status = "running"
             run.started_at = func.now()
@@ -82,6 +100,8 @@ async def project_event(command: dict[str, Any]) -> None:
                 step.status = status
             if status in {"succeeded", "failed", "skipped"}:
                 step.finished_at = func.now()
+                if step.started_at is not None:
+                    step_duration = max(0.0, (finished_at - step.started_at).total_seconds())
             if output is not None:
                 step.output_json = output
             if error is not None:
@@ -103,13 +123,27 @@ async def project_event(command: dict[str, Any]) -> None:
                 payload_json=payload,
             )
         )
-        await db.commit()
+        with trace.get_tracer(__name__).start_as_current_span("projection.write") as span:
+            span.set_attribute("run.id", str(run_id))
+            span.set_attribute("event.type", kind)
+            await db.commit()
+        if terminal_run:
+            WORKFLOW_RUNS.labels(run.status).inc()
+            if run_duration is not None:
+                WORKFLOW_DURATION.observe(run_duration)
+        if step_duration is not None:
+            STEP_DURATION.labels(kind.split(".", 1)[1]).observe(step_duration)
+        event(logger, "run.projection", run_id=str(run_id), node_id=node_id, status=kind)
 
 
 @activity.defn(name="execute_mock_action")
 async def execute_mock_action(command: dict[str, Any]) -> dict[str, Any]:
+    from app.observability import ACTIVITY_RETRIES
+
     run_id = uuid.UUID(command["run_id"])
     node_id = str(command["node_id"])
+    if activity.info().attempt > 1:
+        ACTIVITY_RETRIES.labels("mock").inc()
     try:
         config = HttpConfig.model_validate(command["config"])
     except ValidationError:
@@ -163,6 +197,8 @@ async def execute_mock_action(command: dict[str, Any]) -> dict[str, Any]:
 
 @activity.defn(name="execute_https_action")
 async def execute_https_action(command: dict[str, Any]) -> dict[str, Any]:
+    from app.observability import ACTIVITY_RETRIES
+
     # Keep network-client imports out of Temporal's deterministic workflow sandbox.
     from orchestrator.http_connector import HttpActionError, execute_https_get
 
@@ -171,6 +207,8 @@ async def execute_https_action(command: dict[str, Any]) -> dict[str, Any]:
     except ValidationError:
         raise ApplicationError("Action configuration is invalid", non_retryable=True) from None
     attempt = activity.info().attempt
+    if attempt > 1:
+        ACTIVITY_RETRIES.labels("https").inc()
     try:
         output = await execute_https_get(config)
     except HttpActionError as exc:
@@ -204,9 +242,13 @@ async def execute_https_action(command: dict[str, Any]) -> dict[str, Any]:
 
 @activity.defn(name="execute_provider_action")
 async def execute_provider_activity(command: dict[str, Any]) -> dict[str, Any]:
+    from app.observability import ACTIVITY_RETRIES
+
     from orchestrator.providers import ProviderError, execute_provider_action
 
     try:
+        if activity.info().attempt > 1:
+            ACTIVITY_RETRIES.labels("provider").inc()
         return await execute_provider_action(command)
     except ProviderError as exc:
         attempt = activity.info().attempt
@@ -242,7 +284,10 @@ async def execute_provider_activity(command: dict[str, Any]) -> dict[str, Any]:
 
 @activity.defn(name="execute_agent")
 async def execute_agent(command: dict[str, Any]) -> dict[str, Any]:
+    from opentelemetry import trace
+
     from app.integration_crypto import decrypt_credentials
+    from app.observability import AGENT_COST, AGENT_TOKENS
 
     from orchestrator.agent import AgentFailure, run_agent
 
@@ -266,7 +311,16 @@ async def execute_agent(command: dict[str, Any]) -> dict[str, Any]:
                         content.key_version,
                     )
                 )
-        return await run_agent(command["run_id"], command["config"], source)
+        with trace.get_tracer(__name__).start_as_current_span("agent.invoke") as span:
+            span.set_attribute("run.id", command["run_id"])
+            span.set_attribute("model.profile", command["config"]["model_profile"])
+            result = await run_agent(command["run_id"], command["config"], source)
+        profile = command["config"]["model_profile"]
+        usage = result["usage"]
+        AGENT_TOKENS.labels(profile, "input").inc(usage["input_tokens"])
+        AGENT_TOKENS.labels(profile, "output").inc(usage["output_tokens"])
+        AGENT_COST.inc(usage["cost_microusd"])
+        return result
     except AgentFailure as exc:
         await project_event(
             {
@@ -308,6 +362,8 @@ async def open_approval(command: dict[str, Any]) -> str:
 
 @activity.defn(name="approval_status")
 async def approval_status(command: dict[str, Any]) -> str:
+    from app.observability import APPROVAL_WAIT
+
     async with session_factory()() as db:
         row = await db.get(Approval, uuid.UUID(command["approval_id"]), with_for_update=True)
         if row is None:
@@ -317,4 +373,5 @@ async def approval_status(command: dict[str, Any]) -> str:
         ):
             row.status = "expired"
             await db.commit()
+            APPROVAL_WAIT.observe(max(0.0, (datetime.now(UTC) - row.created_at).total_seconds()))
         return row.status

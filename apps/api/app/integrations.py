@@ -18,6 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from app.auth import Db, UserDep, membership, require_csrf
 from app.config import get_settings
 from app.integration_crypto import active_key_version, decrypt_credentials, encrypt_credentials
+from app.limits import admit_request, workspace_has_capacity
 from app.models import (
     AuditLog,
     Integration,
@@ -32,6 +33,7 @@ from app.models import (
     WorkflowRun,
     WorkflowVersion,
 )
+from app.observability import WEBHOOK_DEDUPLICATED
 from app.runs import redact
 
 router = APIRouter(prefix="/api/v1", tags=["integrations"])
@@ -619,6 +621,7 @@ async def github_webhook(public_id: str, request: Request, db: Db) -> DeliveryOu
         raise HTTPException(status_code=422, detail="Invalid issue event") from None
     if event.repository.full_name != values["repository"]:
         raise HTTPException(status_code=403, detail="Repository mismatch")
+    digest = hashlib.sha256(raw).hexdigest()
     current_trigger = await db.scalar(
         select(Trigger)
         .where(Trigger.id == trigger.id)
@@ -640,10 +643,24 @@ async def github_webhook(public_id: str, request: Request, db: Db) -> DeliveryOu
         or current_integration.key_version != verified_key_version
     ):
         raise HTTPException(status_code=409, detail="Trigger or credential changed during delivery")
+    previous = await db.scalar(
+        select(WebhookDelivery).where(
+            WebhookDelivery.trigger_id == trigger.id,
+            WebhookDelivery.delivery_id == delivery_id,
+        )
+    )
+    if previous is not None:
+        if previous.payload_hash != digest:
+            raise HTTPException(status_code=409, detail="Delivery ID conflict")
+        WEBHOOK_DEDUPLICATED.inc()
+        return DeliveryOut(run_id=previous.result_run_id, status="queued", duplicate=True)
+    await admit_request("github_webhook", trigger.id, get_settings().github_webhooks_per_minute)
     trigger_id = trigger.id
     workflow = await db.get(Workflow, trigger.workflow_id)
     if workflow is None or workflow.status != "active":
         raise HTTPException(status_code=404, detail="Trigger not found")
+    if not await workspace_has_capacity(db, trigger.workspace_id):
+        raise HTTPException(status_code=429, detail="Workspace active run limit exceeded")
     payload = {
         "provider": "github",
         "action": event.action,
@@ -651,7 +668,6 @@ async def github_webhook(public_id: str, request: Request, db: Db) -> DeliveryOu
         "issue_number": event.issue.number,
         "state": event.issue.state,
     }
-    digest = hashlib.sha256(raw).hexdigest()
     delivery = WebhookDelivery(
         trigger_id=trigger_id,
         provider="github",
@@ -722,5 +738,6 @@ async def github_webhook(public_id: str, request: Request, db: Db) -> DeliveryOu
         )
         if prior is None or prior.payload_hash != digest:
             raise HTTPException(status_code=409, detail="Delivery ID conflict") from None
+        WEBHOOK_DEDUPLICATED.inc()
         return DeliveryOut(run_id=prior.result_run_id, status="queued", duplicate=True)
     return DeliveryOut(run_id=run_id, status="queued", duplicate=False)
