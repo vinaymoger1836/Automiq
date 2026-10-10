@@ -6,12 +6,14 @@ from typing import Any
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
     Integer,
+    LargeBinary,
     String,
     UniqueConstraint,
     func,
@@ -201,7 +203,8 @@ class StepRun(Base):
     __table_args__ = (
         UniqueConstraint("run_id", "node_id", "attempt", name="uq_step_attempt"),
         CheckConstraint(
-            "status IN ('running','succeeded','failed','skipped')", name="status_valid"
+            "status IN ('running','awaiting_approval','succeeded','failed','skipped')",
+            name="status_valid",
         ),
         Index("ix_step_runs_run_node", "run_id", "node_id"),
     )
@@ -214,13 +217,59 @@ class StepRun(Base):
     )
     node_id: Mapped[str] = mapped_column(String(64), nullable=False)
     attempt: Mapped[int] = mapped_column(Integer, nullable=False)
-    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False)
     output_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     error: Mapped[str | None] = mapped_column(String(255))
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Approval(Base):
+    __tablename__ = "approvals"
+    __table_args__ = (
+        UniqueConstraint("run_id", "node_id", name="uq_approvals_run_node"),
+        CheckConstraint(
+            "status IN ('pending','approved','rejected','expired')", name="status_valid"
+        ),
+        Index("ix_approvals_workspace_status", "workspace_id", "status", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=False
+    )
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("workflow_runs.id"), nullable=False
+    )
+    node_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default=text("'pending'")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decided_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    signal_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class IssueContent(Base):
+    __tablename__ = "issue_contents"
+
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("workflow_runs.id"), primary_key=True
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=False
+    )
+    encrypted_content: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    key_version: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
 class RunEvent(Base):
@@ -271,3 +320,115 @@ class ActionEffect(Base):
     node_id: Mapped[str] = mapped_column(String(64), nullable=False)
     invocations: Mapped[int] = mapped_column(Integer, nullable=False)
     output_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+
+
+class Integration(Base):
+    __tablename__ = "integrations"
+    __table_args__ = (
+        UniqueConstraint("id", "workspace_id", name="uq_integrations_id_workspace"),
+        CheckConstraint("provider IN ('github','slack')", name="provider_valid"),
+        CheckConstraint("key_version > 0", name="key_version_positive"),
+        CheckConstraint("credential_version > 0", name="credential_version_positive"),
+        Index("ix_integrations_workspace_provider", "workspace_id", "provider"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=False
+    )
+    provider: Mapped[str] = mapped_column(String(16), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    encrypted_credentials: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    key_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    credential_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("1")
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    rotated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class Trigger(Base):
+    __tablename__ = "triggers"
+    __table_args__ = (
+        UniqueConstraint("public_id", name="uq_triggers_public_id"),
+        CheckConstraint("type IN ('github.issue','schedule')", name="type_valid"),
+        Index("ix_triggers_workspace_workflow", "workspace_id", "workflow_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    public_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=False
+    )
+    workflow_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("workflows.id"), nullable=False
+    )
+    version_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("workflow_versions.id"), nullable=False
+    )
+    integration_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("integrations.id")
+    )
+    type: Mapped[str] = mapped_column(String(32), nullable=False)
+    config_json: Mapped[dict[str, Any]] = mapped_column(
+        "config", JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class IntegrationAssignment(Base):
+    __tablename__ = "integration_assignments"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["integration_id", "workspace_id"],
+            ["integrations.id", "integrations.workspace_id"],
+            name="fk_integration_assignments_workspace_integration",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "user_id"],
+            ["memberships.workspace_id", "memberships.user_id"],
+            name="fk_integration_assignments_membership",
+        ),
+        Index("ix_integration_assignments_workspace_user", "workspace_id", "user_id"),
+    )
+
+    integration_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class WebhookDelivery(Base):
+    __tablename__ = "webhook_deliveries"
+    __table_args__ = (
+        UniqueConstraint("trigger_id", "delivery_id", name="uq_webhook_trigger_delivery"),
+        Index("ix_webhook_deliveries_received", "received_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    trigger_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("triggers.id"), nullable=False
+    )
+    provider: Mapped[str] = mapped_column(String(16), nullable=False)
+    delivery_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    result_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("workflow_runs.id")
+    )
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )

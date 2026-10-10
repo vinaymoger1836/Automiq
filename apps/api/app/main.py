@@ -14,8 +14,10 @@ from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import JSONResponse
 from temporalio.client import Client
 
+from app.approvals import router as approvals_router
 from app.auth import router as auth_router
 from app.config import get_settings
+from app.integrations import router as integrations_router
 from app.runs import router as runs_router
 from app.workflows import router as workflows_router
 
@@ -51,6 +53,8 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(workflows_router)
 app.include_router(runs_router)
+app.include_router(integrations_router)
+app.include_router(approvals_router)
 
 
 @app.middleware("http")
@@ -68,6 +72,7 @@ async def http_error(request: Request, exc: HTTPException) -> JSONResponse:
         403: "forbidden",
         404: "not_found",
         409: "conflict",
+        413: "payload_too_large",
         422: "validation_error",
     }.get(exc.status_code, "request_error")
     detail = exc.detail

@@ -1,6 +1,7 @@
 """Versioned workflow graph contract and publish-time validation."""
 
 import re
+import uuid
 from collections import defaultdict
 from typing import Annotated, Literal
 
@@ -12,6 +13,14 @@ class StrictModel(BaseModel):
 
 
 class ManualConfig(StrictModel):
+    pass
+
+
+class GithubIssueConfig(StrictModel):
+    pass
+
+
+class ScheduleConfig(StrictModel):
     pass
 
 
@@ -68,6 +77,74 @@ class EndConfig(StrictModel):
     pass
 
 
+class GithubCommentConfig(StrictModel):
+    integration_id: uuid.UUID
+    body: str = Field(min_length=1, max_length=4000)
+
+
+class SlackMessageConfig(StrictModel):
+    integration_id: uuid.UUID
+    channel: str = Field(pattern=r"^[#A-Za-z0-9_-]{1,80}$")
+    text: str = Field(min_length=1, max_length=4000)
+
+
+class AgentSchema(StrictModel):
+    # Deliberately small JSON Schema subset so the same contract works for fake and real providers.
+    type: Literal["object"] = "object"
+    properties: dict[str, Literal["string", "number", "integer", "boolean"]] = Field(
+        default_factory=dict, max_length=12
+    )
+    required: list[str] = Field(default_factory=list, max_length=12)
+
+    @model_validator(mode="after")
+    def valid_fields(self) -> "AgentSchema":
+        if any(not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,39}", key) for key in self.properties):
+            raise ValueError("Agent schema field names must be simple identifiers")
+        if (
+            len(set(self.required)) != len(self.required)
+            or not set(self.required) <= self.properties.keys()
+        ):
+            raise ValueError("Agent required fields must be unique declared properties")
+        return self
+
+
+class AgentConfig(StrictModel):
+    model_profile: Literal["fake", "openai"] = "fake"
+    instructions: str = Field(min_length=1, max_length=2000)
+    allowed_tools: list[Literal["github.search_issues"]] = Field(default_factory=list, max_length=3)
+    github_integration_id: uuid.UUID | None = None
+    input_schema: AgentSchema = Field(default_factory=AgentSchema)
+    output_schema: AgentSchema = Field(
+        default_factory=lambda: AgentSchema(
+            properties={"severity": "string", "reason": "string"}, required=["severity", "reason"]
+        )
+    )
+    max_tool_calls: int = Field(default=1, ge=0, le=5)
+    max_duration_seconds: int = Field(default=30, ge=1, le=120)
+    max_input_tokens: int = Field(default=2000, ge=100, le=8000)
+    max_output_tokens: int = Field(default=300, ge=30, le=2000)
+    max_cost_microusd: int = Field(default=100000, ge=0, le=1000000)
+
+    @model_validator(mode="after")
+    def valid_tools(self) -> "AgentConfig":
+        if self.output_schema.properties != {"severity": "string", "reason": "string"} or set(
+            self.output_schema.required
+        ) != {"severity", "reason"}:
+            raise ValueError("Phase 5 agent output must declare severity and reason")
+        if len(set(self.allowed_tools)) != len(self.allowed_tools):
+            raise ValueError("Agent tools must be unique")
+        if self.allowed_tools and self.github_integration_id is None:
+            raise ValueError("GitHub tool requires a configured integration")
+        if self.max_tool_calls == 0 and self.allowed_tools:
+            raise ValueError("Tool quota must allow configured tools")
+        return self
+
+
+class ApprovalConfig(StrictModel):
+    title: str = Field(min_length=1, max_length=160)
+    timeout_seconds: int = Field(default=3600, ge=1, le=604800)
+
+
 class Position(StrictModel):
     x: float = Field(ge=-10_000, le=10_000)
     y: float = Field(ge=-10_000, le=10_000)
@@ -77,6 +154,20 @@ class ManualNode(StrictModel):
     id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
     type: Literal["trigger.manual"]
     config: ManualConfig
+    position: Position | None = None
+
+
+class GithubIssueNode(StrictModel):
+    id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
+    type: Literal["trigger.github_issue"]
+    config: GithubIssueConfig
+    position: Position | None = None
+
+
+class ScheduleNode(StrictModel):
+    id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
+    type: Literal["trigger.schedule"]
+    config: ScheduleConfig
     position: Position | None = None
 
 
@@ -101,7 +192,47 @@ class EndNode(StrictModel):
     position: Position | None = None
 
 
-Node = Annotated[ManualNode | HttpNode | ConditionNode | EndNode, Field(discriminator="type")]
+class GithubCommentNode(StrictModel):
+    id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
+    type: Literal["action.github_comment"]
+    config: GithubCommentConfig
+    position: Position | None = None
+
+
+class SlackMessageNode(StrictModel):
+    id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
+    type: Literal["action.slack_message"]
+    config: SlackMessageConfig
+    position: Position | None = None
+
+
+class AgentNode(StrictModel):
+    id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
+    type: Literal["agent"]
+    config: AgentConfig
+    position: Position | None = None
+
+
+class ApprovalNode(StrictModel):
+    id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
+    type: Literal["approval"]
+    config: ApprovalConfig
+    position: Position | None = None
+
+
+Node = Annotated[
+    ManualNode
+    | GithubIssueNode
+    | ScheduleNode
+    | HttpNode
+    | GithubCommentNode
+    | SlackMessageNode
+    | AgentNode
+    | ApprovalNode
+    | ConditionNode
+    | EndNode,
+    Field(discriminator="type"),
+]
 
 
 class Edge(StrictModel):
@@ -138,9 +269,9 @@ def validate_graph(graph: Graph) -> list[Diagnostic]:
     nodes = {node.id: node for node in graph.nodes}
     if len(nodes) != len(graph.nodes):
         add("duplicate_node", "Node IDs must be unique")
-    triggers = [node for node in graph.nodes if node.type == "trigger.manual"]
+    triggers = [node for node in graph.nodes if node.type.startswith("trigger.")]
     if len(triggers) != 1:
-        add("trigger_count", "Graph must contain exactly one manual trigger")
+        add("trigger_count", "Graph must contain exactly one trigger")
     outgoing: dict[str, list[Edge]] = defaultdict(list)
     incoming: dict[str, list[Edge]] = defaultdict(list)
     seen_edges: set[tuple[str, str, str | None]] = set()
@@ -156,7 +287,7 @@ def validate_graph(graph: Graph) -> list[Diagnostic]:
         incoming[edge.target].append(edge)
     for node in graph.nodes:
         ins, outs = incoming[node.id], outgoing[node.id]
-        if node.type == "trigger.manual":
+        if node.type.startswith("trigger."):
             if ins:
                 add("trigger_incoming", "Trigger cannot have incoming edges", node.id)
         elif len(ins) != 1:
@@ -171,6 +302,23 @@ def validate_graph(graph: Graph) -> list[Diagnostic]:
             add("outgoing_count", "Node needs one unlabeled outgoing edge", node.id)
         if node.type != "condition" and any(edge.source_handle is not None for edge in outs):
             add("invalid_handle", "Only conditions may have branch handles", node.id)
+        if node.type in {"action.github_comment", "action.slack_message"}:
+            current = node.id
+            has_approval = False
+            seen: set[str] = set()
+            while len(incoming[current]) == 1 and current not in seen:
+                seen.add(current)
+                current = incoming[current][0].source
+                upstream = nodes[current]
+                if upstream.type == "approval":
+                    has_approval = True
+                if upstream.type == "agent" and not has_approval:
+                    add(
+                        "approval_required",
+                        "External actions influenced by an agent need an approval checkpoint",
+                        node.id,
+                    )
+                    break
 
     visited: set[str] = set()
     active: set[str] = set()

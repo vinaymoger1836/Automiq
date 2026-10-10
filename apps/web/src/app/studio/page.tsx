@@ -11,10 +11,19 @@ type RunSummary = { run_id: string; version_id: string; status: string; created_
 type TimelineEvent = { id: number; type: string; payload: Record<string, unknown> };
 type Notice = { kind: "success" | "error" | "info"; text: string };
 type Member = { user_id: string; email: string; role: Role };
+type Integration = { id: string; provider: "github" | "slack"; display_name: string; key_version: number; credential_version: number; revoked_at: string | null; can_configure: boolean };
+type Trigger = { id: string; type: "github.issue" | "schedule"; version_id: string; integration_id: string | null; enabled: boolean; webhook_path: string | null; webhook_url: string | null; config: Record<string, string> };
+type Approval = { id: string; run_id: string; node_id: string; title: string; status: string; created_at: string; expires_at: string; decided_at: string | null; can_approve: boolean };
 
 const palette: { kind: NodeKind; hint: string }[] = [
   { kind: "trigger.manual", hint: "Start here" },
+  { kind: "trigger.github_issue", hint: "Signed webhook" },
+  { kind: "trigger.schedule", hint: "Timed run" },
   { kind: "action.http", hint: "Mock action" },
+  { kind: "action.github_comment", hint: "Reply to issue" },
+  { kind: "action.slack_message", hint: "Notify a channel" },
+  { kind: "agent", hint: "Bounded classification" },
+  { kind: "approval", hint: "Human checkpoint" },
   { kind: "condition", hint: "True / false" },
   { kind: "end", hint: "Finish a path" },
 ];
@@ -59,6 +68,20 @@ export default function StudioPage() {
   const [workspaceName, setWorkspaceName] = useState("");
   const [workflowName, setWorkflowName] = useState("");
   const [members, setMembers] = useState<Member[]>([]);
+  const [integrations, setIntegrations] = useState<Integration[]>([]);
+  const [triggers, setTriggers] = useState<Trigger[]>([]);
+  const [approvals, setApprovals] = useState<Approval[]>([]);
+  const [newProvider, setNewProvider] = useState<"github" | "slack">("github");
+  const [editIntegrationId, setEditIntegrationId] = useState("");
+  const [assignmentTarget, setAssignmentTarget] = useState("");
+  const [assignmentEditor, setAssignmentEditor] = useState("");
+  const [integrationName, setIntegrationName] = useState("");
+  const [integrationToken, setIntegrationToken] = useState("");
+  const [webhookSecret, setWebhookSecret] = useState("");
+  const [repository, setRepository] = useState("");
+  const [triggerIntegration, setTriggerIntegration] = useState("");
+  const [scheduleCron, setScheduleCron] = useState("0 9 * * 1-5");
+  const [scheduleTimezone, setScheduleTimezone] = useState("UTC");
   const [memberEmail, setMemberEmail] = useState("");
   const [memberRole, setMemberRole] = useState<Role>("viewer");
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -101,14 +124,15 @@ export default function StudioPage() {
 
   const openWorkflow = useCallback(async (ws: string, id: string) => {
     try {
-      const [workflow, published, runs] = await Promise.all([
+      const [workflow, published, runs, bindings] = await Promise.all([
         api<Workflow>(pathFor(ws, id)),
         api<Version[]>(`${pathFor(ws, id)}/versions`),
         api<RunSummary[]>(`${pathFor(ws, id)}/runs`),
+        api<Trigger[]>(`${pathFor(ws, id)}/triggers`),
       ]);
       setSelected(workflow); setGraph(workflow.draft_graph); setDirty(false); setSelectedNodeId(null);
       setLinkSource(""); setLinkTarget("");
-      setDiagnostics([]); setVersions(published); setRecentRuns(runs);
+      setDiagnostics([]); setVersions(published); setRecentRuns(runs); setTriggers(bindings);
       setRunId(runs[0]?.run_id || null); setRun(null); setTimeline([]);
     } catch (error) { announce(errorText(error), "error"); }
   }, [announce]);
@@ -131,6 +155,28 @@ export default function StudioPage() {
     void api<Member[]>(`/api/v1/workspaces/${workspaceId}/memberships`).then(setMembers)
       .catch((error) => announce(errorText(error), "error"));
   }, [workspaceId, role, announce]);
+
+  useEffect(() => {
+    if (!workspaceId || authState !== "signed_in") { setIntegrations([]); return; }
+    void api<Integration[]>(`/api/v1/workspaces/${workspaceId}/integrations`).then(setIntegrations)
+      .catch((error) => announce(errorText(error), "error"));
+  }, [workspaceId, authState, announce]);
+
+  useEffect(() => {
+    if (!workspaceId || authState !== "signed_in") { setApprovals([]); return; }
+    const refresh = () => { void api<Approval[]>(`/api/v1/workspaces/${workspaceId}/approvals`)
+      .then(setApprovals).catch((error) => announce(errorText(error), "error")); };
+    refresh();
+    const interval = window.setInterval(refresh, 5000);
+    return () => window.clearInterval(interval);
+  }, [workspaceId, authState, announce]);
+
+  useEffect(() => {
+    if (!base) return;
+    const refreshRuns = () => { void api<RunSummary[]>(`${base}/runs`).then(setRecentRuns).catch(() => {}); };
+    const interval = window.setInterval(refreshRuns, 5000);
+    return () => window.clearInterval(interval);
+  }, [base]);
 
   useEffect(() => {
     if (!dirty) return;
@@ -220,6 +266,14 @@ export default function StudioPage() {
     } finally { setBusy(false); }
   };
 
+  const decideApproval = (item: Approval, decision: "approved" | "rejected") => void runAction(async () => {
+    if (!workspaceId || !me || role !== "owner") return;
+    const updated = await api<Approval>(`/api/v1/workspaces/${workspaceId}/approvals/${item.id}/decision`,
+      { method: "POST", body: JSON.stringify({ decision }) }, me.csrf_token);
+    setApprovals((rows) => rows.map((row) => row.id === item.id ? updated : row));
+    announce(decision === "approved" ? "Action approved." : "Action rejected.", "success");
+  });
+
   const changeGraph = (next: Graph) => { setGraph(next); setDirty(true); setDiagnostics([]); };
   const updateNode = (node: GraphNode) => {
     if (!graph) return;
@@ -227,11 +281,17 @@ export default function StudioPage() {
   };
   const addNode = (kind: NodeKind) => {
     if (!graph || !canEdit) return;
-    if (kind === "trigger.manual" && graph.nodes.some((node) => node.type === kind)) {
-      announce("A workflow has one manual trigger.", "error"); return;
+    if (kind.startsWith("trigger.")) {
+      const trigger = graph.nodes.find((node) => node.type.startsWith("trigger."));
+      if (trigger) {
+        changeGraph({ ...graph, nodes: graph.nodes.map((node) => node.id === trigger.id ? { ...node, type: kind, config: {} } : node) });
+        setSelectedNodeId(trigger.id);
+        announce(`${labels[kind]} selected. Save and publish the draft to activate it.`, "info");
+        return;
+      }
     }
-    const isFirstAction = kind === "action.http" && graph.nodes.length === 2 &&
-      graph.nodes.some((node) => node.type === "trigger.manual") &&
+    const isFirstAction = kind.startsWith("action.") && graph.nodes.length === 2 &&
+      graph.nodes.some((node) => node.type.startsWith("trigger.")) &&
       graph.nodes.some((node) => node.type === "end");
     const next = newNode(kind, graph, isFirstAction ? { x: 310, y: 185 } :
       { x: 120 + graph.nodes.length * 215, y: 185 });
@@ -340,8 +400,53 @@ export default function StudioPage() {
     if (selected?.id === updated.id) setSelected(updated);
     setArchiveTarget(null); announce("Workflow archived.", "success");
   });
+  const saveIntegration = () => void runAction(async () => {
+    if (!workspaceId || !me) return;
+    const body = { provider: newProvider, display_name: integrationName.trim(), token: integrationToken,
+      ...(newProvider === "github" ? { webhook_secret: webhookSecret, repository: repository.trim() } : {}) };
+    const path = `/api/v1/workspaces/${workspaceId}/integrations`;
+    const saved = await api<Integration>(editIntegrationId ? `${path}/${editIntegrationId}` : path,
+      { method: editIntegrationId ? "PUT" : "POST", body: JSON.stringify(body) }, me.csrf_token);
+    setIntegrations((items) => [saved, ...items.filter((item) => item.id !== saved.id)]);
+    setIntegrationToken(""); setWebhookSecret(""); setIntegrationName(""); setRepository(""); setEditIntegrationId("");
+    announce(editIntegrationId ? "Credential rotated." : "Integration saved.", "success");
+  });
+  const revokeIntegration = (id: string) => void runAction(async () => {
+    if (!workspaceId || !me) return;
+    const updated = await api<Integration>(`/api/v1/workspaces/${workspaceId}/integrations/${id}/revoke`,
+      { method: "POST" }, me.csrf_token);
+    setIntegrations((items) => items.map((item) => item.id === id ? updated : item));
+    announce("Integration revoked. Its triggers and actions will stop.", "success");
+  });
+  const assignIntegration = () => void runAction(async () => {
+    if (!workspaceId || !me || !assignmentTarget || !assignmentEditor) return;
+    await api<Integration>(`/api/v1/workspaces/${workspaceId}/integrations/${assignmentTarget}/assign`,
+      { method: "POST", body: JSON.stringify({ user_id: assignmentEditor }) }, me.csrf_token);
+    setAssignmentTarget(""); setAssignmentEditor("");
+    announce("Editor assigned to integration.", "success");
+  });
+  const bindGithubTrigger = () => void runAction(async () => {
+    if (!base || !me) return;
+    const trigger = await api<Trigger>(`${base}/triggers/github`, { method: "POST",
+      body: JSON.stringify({ integration_id: triggerIntegration }) }, me.csrf_token);
+    setTriggers((items) => [...items, trigger]); announce("GitHub webhook is ready.", "success");
+  });
+  const bindSchedule = () => void runAction(async () => {
+    if (!base || !me) return;
+    const trigger = await api<Trigger>(`${base}/triggers/schedule`, { method: "POST",
+      body: JSON.stringify({ cron: scheduleCron.trim(), timezone: scheduleTimezone.trim() }) }, me.csrf_token);
+    setTriggers((items) => [...items, trigger]); announce("Schedule queued for registration.", "success");
+  });
+  const disableTrigger = (id: string) => void runAction(async () => {
+    if (!base || !me) return;
+    const disabled = await api<Trigger>(`${base}/triggers/${id}/disable`,
+      { method: "POST" }, me.csrf_token);
+    setTriggers((items) => items.map((item) => item.id === id ? disabled : item));
+    announce("Trigger disabled.", "success");
+  });
 
   const latestVersion = versions[0];
+  const publishedTriggerKind = latestVersion?.graph.nodes.find((node) => node.type.startsWith("trigger."))?.type;
   const statusByNode = useMemo(() => new Map(run?.steps.map((step) => [step.node_id, step.status])), [run?.steps]);
 
   return <main className="studio-shell">
@@ -404,7 +509,7 @@ export default function StudioPage() {
             <WorkflowCanvas graph={graph} onChange={changeGraph} onSelect={setSelectedNodeId} selectedId={selectedNodeId} readOnly={!canEdit} run={run} theme={theme} onNotice={(message) => announce(message, message.includes("cannot") || message.includes("only") || message.includes("Cycles") ? "error" : "info")} />
             <div className="connection-editor"><div className="connection-fields"><label htmlFor="link-source">From<select id="link-source" aria-label="From node" value={linkSource} onChange={(event) => setLinkSource(event.target.value)} disabled={!canEdit}><option value="">Choose node</option>{graph.nodes.filter((node) => node.type !== "end").map((node) => <option key={node.id} value={node.id}>{node.id}</option>)}</select></label>
               {graph.nodes.find((node) => node.id === linkSource)?.type === "condition" && <label htmlFor="link-branch">Branch<select id="link-branch" aria-label="Branch" value={linkBranch} onChange={(event) => setLinkBranch(event.target.value as "true" | "false")} disabled={!canEdit}><option value="true">True</option><option value="false">False</option></select></label>}
-              <label htmlFor="link-target">To<select id="link-target" aria-label="To node" value={linkTarget} onChange={(event) => setLinkTarget(event.target.value)} disabled={!canEdit}><option value="">Choose node</option>{graph.nodes.filter((node) => node.type !== "trigger.manual").map((node) => <option key={node.id} value={node.id}>{node.id}</option>)}</select></label>
+              <label htmlFor="link-target">To<select id="link-target" aria-label="To node" value={linkTarget} onChange={(event) => setLinkTarget(event.target.value)} disabled={!canEdit}><option value="">Choose node</option>{graph.nodes.filter((node) => !node.type.startsWith("trigger.")).map((node) => <option key={node.id} value={node.id}>{node.id}</option>)}</select></label>
               <button type="button" className="studio-secondary" onClick={addConnection} disabled={!canEdit || !linkSource || !linkTarget}>Connect nodes</button></div>
               <div className="connection-list">{graph.edges.length ? graph.edges.map((edge, index) => <span key={`${edge.source}-${edge.target}-${index}`}>{edge.source}{edge.source_handle && ` [${edge.source_handle}]`} → {edge.target}{canEdit && <button type="button" aria-label={`Remove connection ${edge.source} to ${edge.target}`} onClick={() => changeGraph({ ...graph, edges: graph.edges.filter((_, position) => position !== index) })}>×</button>}</span>) : <small>No connections yet.</small>}</div>
             </div>
@@ -412,6 +517,19 @@ export default function StudioPage() {
           </div><aside className="inspector" aria-label="Node inspector">
             <div className="inspector-title"><span className="studio-kicker">INSPECTOR</span><strong>{selectedNode ? labels[selectedNode.type] : "Select a node"}</strong></div>
             {selectedNode ? <div className="inspector-content"><div className="inspector-id"><span>NODE ID</span><code>{selectedNode.id}</code><span className={`step-state ${statusByNode.get(selectedNode.id) || "idle"}`}>{statusByNode.get(selectedNode.id) || "Not run"}</span></div>
+              {selectedNode.type === "agent" && <>
+                <label htmlFor="agent-profile">Model profile</label><select id="agent-profile" value={String(selectedNode.config.model_profile || "fake")} onChange={(event) => updateNode({ ...selectedNode, config: { ...selectedNode.config, model_profile: event.target.value } })} disabled={!canEdit}><option value="fake">Local fake</option><option value="openai">Configured OpenAI</option></select>
+                <label htmlFor="agent-instructions">Instructions</label><textarea id="agent-instructions" value={String(selectedNode.config.instructions || "")} onChange={(event) => updateNode({ ...selectedNode, config: { ...selectedNode.config, instructions: event.target.value } })} disabled={!canEdit} maxLength={2000} rows={4} />
+                <label htmlFor="agent-tool">Read-only tool</label><select id="agent-tool" value={Array.isArray(selectedNode.config.allowed_tools) && selectedNode.config.allowed_tools.length ? "github.search_issues" : "none"} onChange={(event) => updateNode({ ...selectedNode, config: { ...selectedNode.config, allowed_tools: event.target.value === "none" ? [] : ["github.search_issues"], github_integration_id: event.target.value === "none" ? null : (selectedNode.config.github_integration_id || "00000000-0000-0000-0000-000000000000") } })} disabled={!canEdit}><option value="none">No tools</option><option value="github.search_issues">GitHub issue search</option></select>
+                {Array.isArray(selectedNode.config.allowed_tools) && selectedNode.config.allowed_tools.length > 0 && <><label htmlFor="agent-github">GitHub integration</label><select id="agent-github" value={String(selectedNode.config.github_integration_id || "")} onChange={(event) => updateNode({ ...selectedNode, config: { ...selectedNode.config, github_integration_id: event.target.value } })} disabled={!canEdit}><option value="00000000-0000-0000-0000-000000000000">Choose an integration</option>{integrations.filter((item) => item.provider === "github" && !item.revoked_at).map((item) => <option key={item.id} value={item.id}>{item.display_name}</option>)}</select></>}
+                <label htmlFor="agent-tool-calls">Maximum tool calls</label><input id="agent-tool-calls" type="number" min="0" max="5" value={Number(selectedNode.config.max_tool_calls ?? 1)} onChange={(event) => updateNode({ ...selectedNode, config: { ...selectedNode.config, max_tool_calls: Number(event.target.value) } })} disabled={!canEdit} />
+                <label htmlFor="agent-duration">Maximum duration (seconds)</label><input id="agent-duration" type="number" min="1" max="120" value={Number(selectedNode.config.max_duration_seconds ?? 30)} onChange={(event) => updateNode({ ...selectedNode, config: { ...selectedNode.config, max_duration_seconds: Number(event.target.value) } })} disabled={!canEdit} />
+                <label htmlFor="agent-input-tokens">Input token budget</label><input id="agent-input-tokens" type="number" min="100" max="8000" value={Number(selectedNode.config.max_input_tokens ?? 2000)} onChange={(event) => updateNode({ ...selectedNode, config: { ...selectedNode.config, max_input_tokens: Number(event.target.value) } })} disabled={!canEdit} />
+                <label htmlFor="agent-output-tokens">Output token budget</label><input id="agent-output-tokens" type="number" min="30" max="2000" value={Number(selectedNode.config.max_output_tokens ?? 300)} onChange={(event) => updateNode({ ...selectedNode, config: { ...selectedNode.config, max_output_tokens: Number(event.target.value) } })} disabled={!canEdit} />
+                <label htmlFor="agent-cost">Cost budget (micro USD)</label><input id="agent-cost" type="number" min="0" max="1000000" value={Number(selectedNode.config.max_cost_microusd ?? 100000)} onChange={(event) => updateNode({ ...selectedNode, config: { ...selectedNode.config, max_cost_microusd: Number(event.target.value) } })} disabled={!canEdit} />
+                <p>The output contract requires severity and reason. Untrusted issue text cannot grant a tool or approval.</p>
+              </>}
+              {selectedNode.type === "approval" && <><label htmlFor="approval-title">Approval request</label><input id="approval-title" value={String(selectedNode.config.title || "")} onChange={(event) => updateNode({ ...selectedNode, config: { ...selectedNode.config, title: event.target.value } })} disabled={!canEdit} maxLength={160} /><label htmlFor="approval-timeout">Timeout (seconds)</label><input id="approval-timeout" type="number" min="1" max="604800" value={Number(selectedNode.config.timeout_seconds ?? 3600)} onChange={(event) => updateNode({ ...selectedNode, config: { ...selectedNode.config, timeout_seconds: Number(event.target.value) } })} disabled={!canEdit} /><p>Only a workspace owner can approve. The run fails closed when the time expires or the request is rejected.</p></>}
               {selectedNode.type === "action.http" && <>
                 <label htmlFor="http-operation">Action mode</label>
                 <select id="http-operation" value={String(selectedNode.config.operation || "mock")} onChange={(event) => updateNode({ ...selectedNode, config: event.target.value === "https_get" ? { operation: "https_get", path: "/status", response_fields: ["ok"], timeout_seconds: 10 } : { operation: "mock", mock_output: {}, timeout_seconds: 10 } })} disabled={!canEdit}>
@@ -425,15 +543,52 @@ export default function StudioPage() {
                   <label htmlFor="mock-output">Mock response JSON</label><textarea id="mock-output" value={configText} onChange={(event) => setConfigText(event.target.value)} onBlur={() => { try { const output = parsePayload(configText); updateNode({ ...selectedNode, config: { ...selectedNode.config, mock_output: output } }); } catch (error) { announce(errorText(error), "error"); } }} disabled={!canEdit} rows={6} /><p>Returned by the local mock adapter without an outbound call.</p>
                 </>}
               </>}
+              {(selectedNode.type === "action.github_comment" || selectedNode.type === "action.slack_message") && <>
+                <label htmlFor="action-integration">Integration</label>
+                <select id="action-integration" value={String(selectedNode.config.integration_id || "")} onChange={(event) => updateNode({ ...selectedNode, config: { ...selectedNode.config, integration_id: event.target.value } })} disabled={!canEdit}>
+                  <option value="00000000-0000-0000-0000-000000000000">Choose an integration</option>
+                  {integrations.filter((item) => item.provider === (selectedNode.type === "action.github_comment" ? "github" : "slack") && !item.revoked_at).map((item) => <option key={item.id} value={item.id}>{item.display_name}</option>)}
+                </select>
+                {selectedNode.type === "action.github_comment" ? <><label htmlFor="github-comment-body">Comment</label><textarea id="github-comment-body" value={String(selectedNode.config.body || "")} onChange={(event) => updateNode({ ...selectedNode, config: { ...selectedNode.config, body: event.target.value } })} disabled={!canEdit} rows={4} maxLength={4000} /><p>Posts to the issue that started this run. An uncertain provider result stops for review.</p></> : <><label htmlFor="slack-channel">Channel</label><input id="slack-channel" value={String(selectedNode.config.channel || "")} onChange={(event) => updateNode({ ...selectedNode, config: { ...selectedNode.config, channel: event.target.value } })} disabled={!canEdit} /><label htmlFor="slack-text">Message</label><textarea id="slack-text" value={String(selectedNode.config.text || "")} onChange={(event) => updateNode({ ...selectedNode, config: { ...selectedNode.config, text: event.target.value } })} disabled={!canEdit} rows={4} maxLength={4000} /></>}
+              </>}
               {selectedNode.type === "condition" && <><label htmlFor="condition-path">Value path</label><input id="condition-path" value={String((selectedNode.config.expression as Record<string, unknown>)?.path || "")} onChange={(event) => updateNode({ ...selectedNode, config: { expression: { ...(selectedNode.config.expression as object), path: event.target.value } } })} disabled={!canEdit} /><label htmlFor="condition-operator">Operator</label><select id="condition-operator" value={String((selectedNode.config.expression as Record<string, unknown>)?.operator || "eq")} onChange={(event) => updateNode({ ...selectedNode, config: { expression: { ...(selectedNode.config.expression as object), operator: event.target.value } } })} disabled={!canEdit}><option value="eq">Equals</option><option value="ne">Does not equal</option><option value="exists">Exists</option></select><label htmlFor="condition-value">Compare with</label><input id="condition-value" value={String((selectedNode.config.expression as Record<string, unknown>)?.value ?? "")} onChange={(event) => updateNode({ ...selectedNode, config: { expression: { ...(selectedNode.config.expression as object), value: event.target.value === "true" ? true : event.target.value === "false" ? false : event.target.value } } })} disabled={!canEdit} /><p>Use a path such as <code>trigger.payload.flag</code> or <code>steps.action_1.output.ok</code>.</p></>}
+              {selectedNode.type === "trigger.github_issue" && <p>Signed GitHub issue events start this workflow. Create the webhook binding below after publishing.</p>}
+              {selectedNode.type === "trigger.schedule" && <p>Temporal starts this workflow on a configured schedule. Add the cron binding below after publishing.</p>}
               {(selectedNode.type === "trigger.manual" || selectedNode.type === "end") && <p>{selectedNode.type === "end" ? "An end node completes this path. It cannot have outgoing connections." : "The manual trigger receives a JSON payload when you run the workflow."}</p>}
               {run?.steps.filter((step) => step.node_id === selectedNode.id).map((step) => <div className="inspector-attempt" key={step.attempt}><strong>Attempt {step.attempt} · {step.status}</strong>{step.output && <pre>{JSON.stringify(step.output, null, 2)}</pre>}{step.error && <p>{step.error}</p>}</div>)}
-              {canEdit && selectedNode.type !== "trigger.manual" && <button type="button" className="danger-link" onClick={() => { changeGraph({ ...graph, nodes: graph.nodes.filter((node) => node.id !== selectedNode.id), edges: graph.edges.filter((edge) => edge.source !== selectedNode.id && edge.target !== selectedNode.id) }); setSelectedNodeId(null); }}>Remove node</button>}
+              {canEdit && !selectedNode.type.startsWith("trigger.") && <button type="button" className="danger-link" onClick={() => { changeGraph({ ...graph, nodes: graph.nodes.filter((node) => node.id !== selectedNode.id), edges: graph.edges.filter((edge) => edge.source !== selectedNode.id && edge.target !== selectedNode.id) }); setSelectedNodeId(null); }}>Remove node</button>}
             </div> : <div className="inspector-placeholder"><span>◇</span><p>Click a node to edit its settings and inspect its latest run result.</p></div>}
           </aside></div>
 
+          <section className="integration-section" aria-labelledby="integration-title">
+            <div className="run-section-header"><div><p className="studio-kicker">CONNECTIONS</p><h2 id="integration-title">Integrations & triggers</h2></div></div>
+            <div className="integration-grid">
+              <div className="integration-card"><h3>Workspace integrations</h3><p>Credentials are encrypted and never shown again after saving.</p>
+                {integrations.length ? <ul className="connection-items">{integrations.map((item) => <li key={item.id}><div><strong>{item.display_name}</strong><small>{item.provider} · Credential {item.credential_version} · {item.revoked_at ? "Revoked" : "Active"}</small></div>{!item.revoked_at && item.can_configure && <div className="connection-actions"><button type="button" onClick={() => { setEditIntegrationId(item.id); setNewProvider(item.provider); setIntegrationName(item.display_name); setIntegrationToken(""); setWebhookSecret(""); setRepository(""); }}>Rotate</button>{role === "owner" && <><button type="button" onClick={() => { setAssignmentTarget(item.id); setAssignmentEditor(""); }} disabled={busy}>Assign</button><button type="button" onClick={() => revokeIntegration(item.id)} disabled={busy}>Revoke</button></>}</div>}</li>)}</ul> : <p className="connection-empty">No integrations connected.</p>}
+                {role === "owner" && assignmentTarget && <form className="connection-form" onSubmit={(event) => { event.preventDefault(); assignIntegration(); }}><strong>Assign an editor</strong><label htmlFor="assignment-editor">Editor</label><select id="assignment-editor" value={assignmentEditor} onChange={(event) => setAssignmentEditor(event.target.value)} required><option value="">Choose editor</option>{members.filter((item) => item.role === "editor").map((item) => <option key={item.user_id} value={item.user_id}>{item.email}</option>)}</select><div className="connection-actions"><button type="submit" className="studio-primary" disabled={busy || !assignmentEditor}>Assign editor</button><button type="button" onClick={() => setAssignmentTarget("")}>Cancel</button></div></form>}
+                {(role === "owner" || editIntegrationId) && <form className="connection-form" onSubmit={(event) => { event.preventDefault(); saveIntegration(); }}>
+                  <strong>{editIntegrationId ? "Rotate credential" : "Add integration"}</strong>
+                  <label htmlFor="integration-provider">Provider</label><select id="integration-provider" value={newProvider} onChange={(event) => setNewProvider(event.target.value as "github" | "slack")} disabled={busy || !!editIntegrationId}><option value="github">GitHub</option><option value="slack">Slack</option></select>
+                  <label htmlFor="integration-name">Name</label><input id="integration-name" value={integrationName} onChange={(event) => setIntegrationName(event.target.value)} required maxLength={120} placeholder="Team integration" />
+                  {newProvider === "github" && <><label htmlFor="integration-repository">Repository</label><input id="integration-repository" value={repository} onChange={(event) => setRepository(event.target.value)} required placeholder="owner/repository" /><label htmlFor="integration-secret">Webhook secret</label><input id="integration-secret" type="password" autoComplete="off" value={webhookSecret} onChange={(event) => setWebhookSecret(event.target.value)} required minLength={16} /></>}
+                  <label htmlFor="integration-token">{newProvider === "github" ? "GitHub token" : "Slack bot token"}</label><input id="integration-token" type="password" autoComplete="off" value={integrationToken} onChange={(event) => setIntegrationToken(event.target.value)} required minLength={8} />
+                  <div className="connection-actions"><button className="studio-primary" type="submit" disabled={busy}>Save integration</button>{editIntegrationId && <button type="button" onClick={() => { setEditIntegrationId(""); setIntegrationName(""); setIntegrationToken(""); setWebhookSecret(""); setRepository(""); }}>Cancel</button>}</div>
+                </form>}
+              </div>
+              <div className="integration-card"><h3>Published triggers</h3><p>Each binding stays pinned to the version shown when it was created.</p>
+                {triggers.length ? <ul className="connection-items">{triggers.map((item) => <li key={item.id}><div><strong>{item.type === "github.issue" ? "GitHub issues" : "Schedule"}</strong><small>{item.enabled ? "Active" : "Disabled"} · Version {versions.find((version) => version.id === item.version_id)?.version || item.version_id.slice(0, 8)}</small>{item.webhook_url && <code className="webhook-path">{item.webhook_url}</code>}{item.type === "schedule" && <small>{item.config.cron} · {item.config.timezone}</small>}</div>{canEdit && item.enabled && <button type="button" onClick={() => disableTrigger(item.id)} disabled={busy}>Disable</button>}</li>)}</ul> : <p className="connection-empty">Publish a GitHub or schedule workflow, then bind its trigger here.</p>}
+                {canEdit && selected.published_version_id && publishedTriggerKind === "trigger.github_issue" && <form className="connection-form" onSubmit={(event) => { event.preventDefault(); bindGithubTrigger(); }}><label htmlFor="trigger-integration">GitHub integration</label><select id="trigger-integration" value={triggerIntegration} onChange={(event) => setTriggerIntegration(event.target.value)} required><option value="">Choose integration</option>{integrations.filter((item) => item.provider === "github" && !item.revoked_at).map((item) => <option key={item.id} value={item.id}>{item.display_name}</option>)}</select><button className="studio-primary" type="submit" disabled={busy || !triggerIntegration}>Create webhook</button></form>}
+                {canEdit && selected.published_version_id && publishedTriggerKind === "trigger.schedule" && <form className="connection-form" onSubmit={(event) => { event.preventDefault(); bindSchedule(); }}><label htmlFor="schedule-cron">Five-field cron</label><input id="schedule-cron" value={scheduleCron} onChange={(event) => setScheduleCron(event.target.value)} required placeholder="0 9 * * 1-5" /><label htmlFor="schedule-timezone">IANA timezone</label><input id="schedule-timezone" value={scheduleTimezone} onChange={(event) => setScheduleTimezone(event.target.value)} required placeholder="UTC" /><button className="studio-primary" type="submit" disabled={busy}>Create schedule</button></form>}
+              </div>
+            </div>
+          </section>
+
+          <section className="integration-section" aria-labelledby="approval-inbox-title">
+            <div className="run-section-header"><div><p className="studio-kicker">HUMAN CHECKPOINTS</p><h2 id="approval-inbox-title">Approval inbox</h2></div><span>{approvals.filter((item) => item.status === "pending").length} pending</span></div>
+            {approvals.length ? <ul className="connection-items approval-inbox">{approvals.map((item) => <li key={item.id}><div><strong>{item.title}</strong><small>Run {item.run_id.slice(0, 8)} · {item.node_id} · {item.status} · Due {formatTime(item.expires_at)}</small></div>{item.can_approve && <div className="connection-actions"><button type="button" className="studio-primary" onClick={() => decideApproval(item, "approved")} disabled={busy}>Approve</button><button type="button" className="studio-secondary" onClick={() => decideApproval(item, "rejected")} disabled={busy}>Reject</button></div>}</li>)}</ul> : <p className="connection-empty">No approval requests in this workspace.</p>}
+          </section>
           <section className="run-section" aria-labelledby="run-title"><div className="run-section-header"><div><p className="studio-kicker">EXECUTION</p><h2 id="run-title">Run & inspect</h2></div><span className={`connection-pill ${connection}`}>{connection === "live" ? "● Live events" : connection === "polling" ? "○ Polling" : connection === "complete" ? "✓ Complete" : "No active stream"}</span></div>
-            {selected.published_version_id ? <div className="run-controls"><div><label htmlFor="run-input">Manual trigger payload</label><textarea id="run-input" value={runInput} onChange={(event) => setRunInput(event.target.value)} disabled={!canEdit} rows={2} /><small>JSON object with text, number, boolean, or null values.</small></div><button type="button" className="studio-primary" onClick={startRun} disabled={!canEdit || busy}>▶ Start run</button></div> : <div className="run-empty">Publish a valid draft to start a run.</div>}
+            {selected.published_version_id && publishedTriggerKind === "trigger.manual" ? <div className="run-controls"><div><label htmlFor="run-input">Manual trigger payload</label><textarea id="run-input" value={runInput} onChange={(event) => setRunInput(event.target.value)} disabled={!canEdit} rows={2} /><small>JSON object with text, number, boolean, or null values.</small></div><button type="button" className="studio-primary" onClick={startRun} disabled={!canEdit || busy}>▶ Start run</button></div> : <div className="run-empty">{selected.published_version_id ? "Runs appear here when a signed webhook or schedule fires." : "Publish a valid draft to start a run."}</div>}
             {recentRuns.length > 0 && <div className="recent-runs"><label htmlFor="recent-run">Recent runs</label><select id="recent-run" value={runId || ""} onChange={(event) => { setRunId(event.target.value); setTimeline([]); }}><option value="">Choose a run</option>{recentRuns.map((item) => <option value={item.run_id} key={item.run_id}>{formatTime(item.created_at)} · {item.status} · {item.run_id.slice(0, 8)}</option>)}</select></div>}
             {run && <div className="run-detail"><div className="run-summary"><div><span className="studio-kicker">RUN {run.run_id.slice(0, 8).toUpperCase()}</span><h3>{run.status === "succeeded" ? "Run completed" : run.status === "failed" ? "Run failed" : run.status === "queued" ? "Waiting for worker" : "Run in progress"}</h3><p>Started {formatTime(run.started_at)} · Version {versions.find((item) => item.id === run.version_id)?.version || run.version_id.slice(0, 8)}</p></div><span className={`run-status ${run.status}`}>{run.status}</span></div>
               {run.error && <p className="run-error" role="alert">{run.error}</p>}

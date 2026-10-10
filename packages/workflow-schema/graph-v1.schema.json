@@ -1,5 +1,223 @@
 {
   "$defs": {
+    "AgentConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "model_profile": {
+          "default": "fake",
+          "enum": [
+            "fake",
+            "openai"
+          ],
+          "title": "Model Profile",
+          "type": "string"
+        },
+        "instructions": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Instructions",
+          "type": "string"
+        },
+        "allowed_tools": {
+          "items": {
+            "const": "github.search_issues",
+            "type": "string"
+          },
+          "maxItems": 3,
+          "title": "Allowed Tools",
+          "type": "array"
+        },
+        "github_integration_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Github Integration Id"
+        },
+        "input_schema": {
+          "$ref": "#/$defs/AgentSchema"
+        },
+        "output_schema": {
+          "$ref": "#/$defs/AgentSchema"
+        },
+        "max_tool_calls": {
+          "default": 1,
+          "maximum": 5,
+          "minimum": 0,
+          "title": "Max Tool Calls",
+          "type": "integer"
+        },
+        "max_duration_seconds": {
+          "default": 30,
+          "maximum": 120,
+          "minimum": 1,
+          "title": "Max Duration Seconds",
+          "type": "integer"
+        },
+        "max_input_tokens": {
+          "default": 2000,
+          "maximum": 8000,
+          "minimum": 100,
+          "title": "Max Input Tokens",
+          "type": "integer"
+        },
+        "max_output_tokens": {
+          "default": 300,
+          "maximum": 2000,
+          "minimum": 30,
+          "title": "Max Output Tokens",
+          "type": "integer"
+        },
+        "max_cost_microusd": {
+          "default": 100000,
+          "maximum": 1000000,
+          "minimum": 0,
+          "title": "Max Cost Microusd",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "instructions"
+      ],
+      "title": "AgentConfig",
+      "type": "object"
+    },
+    "AgentNode": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "agent",
+          "title": "Type",
+          "type": "string"
+        },
+        "config": {
+          "$ref": "#/$defs/AgentConfig"
+        },
+        "position": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Position"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "config"
+      ],
+      "title": "AgentNode",
+      "type": "object"
+    },
+    "AgentSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "object",
+          "default": "object",
+          "title": "Type",
+          "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {
+            "enum": [
+              "string",
+              "number",
+              "integer",
+              "boolean"
+            ],
+            "type": "string"
+          },
+          "maxProperties": 12,
+          "title": "Properties"
+        },
+        "required": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 12,
+          "title": "Required",
+          "type": "array"
+        }
+      },
+      "title": "AgentSchema",
+      "type": "object"
+    },
+    "ApprovalConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "timeout_seconds": {
+          "default": 3600,
+          "maximum": 604800,
+          "minimum": 1,
+          "title": "Timeout Seconds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "title"
+      ],
+      "title": "ApprovalConfig",
+      "type": "object"
+    },
+    "ApprovalNode": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "approval",
+          "title": "Type",
+          "type": "string"
+        },
+        "config": {
+          "$ref": "#/$defs/ApprovalConfig"
+        },
+        "position": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Position"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "config"
+      ],
+      "title": "ApprovalNode",
+      "type": "object"
+    },
     "ConditionConfig": {
       "additionalProperties": false,
       "properties": {
@@ -171,6 +389,106 @@
         "operator"
       ],
       "title": "Expression",
+      "type": "object"
+    },
+    "GithubCommentConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "integration_id": {
+          "format": "uuid",
+          "title": "Integration Id",
+          "type": "string"
+        },
+        "body": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Body",
+          "type": "string"
+        }
+      },
+      "required": [
+        "integration_id",
+        "body"
+      ],
+      "title": "GithubCommentConfig",
+      "type": "object"
+    },
+    "GithubCommentNode": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "action.github_comment",
+          "title": "Type",
+          "type": "string"
+        },
+        "config": {
+          "$ref": "#/$defs/GithubCommentConfig"
+        },
+        "position": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Position"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "config"
+      ],
+      "title": "GithubCommentNode",
+      "type": "object"
+    },
+    "GithubIssueConfig": {
+      "additionalProperties": false,
+      "properties": {},
+      "title": "GithubIssueConfig",
+      "type": "object"
+    },
+    "GithubIssueNode": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "trigger.github_issue",
+          "title": "Type",
+          "type": "string"
+        },
+        "config": {
+          "$ref": "#/$defs/GithubIssueConfig"
+        },
+        "position": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Position"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "config"
+      ],
+      "title": "GithubIssueNode",
       "type": "object"
     },
     "HttpConfig": {
@@ -359,6 +677,112 @@
       ],
       "title": "Position",
       "type": "object"
+    },
+    "ScheduleConfig": {
+      "additionalProperties": false,
+      "properties": {},
+      "title": "ScheduleConfig",
+      "type": "object"
+    },
+    "ScheduleNode": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "trigger.schedule",
+          "title": "Type",
+          "type": "string"
+        },
+        "config": {
+          "$ref": "#/$defs/ScheduleConfig"
+        },
+        "position": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Position"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "config"
+      ],
+      "title": "ScheduleNode",
+      "type": "object"
+    },
+    "SlackMessageConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "integration_id": {
+          "format": "uuid",
+          "title": "Integration Id",
+          "type": "string"
+        },
+        "channel": {
+          "pattern": "^[#A-Za-z0-9_-]{1,80}$",
+          "title": "Channel",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "integration_id",
+        "channel",
+        "text"
+      ],
+      "title": "SlackMessageConfig",
+      "type": "object"
+    },
+    "SlackMessageNode": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "action.slack_message",
+          "title": "Type",
+          "type": "string"
+        },
+        "config": {
+          "$ref": "#/$defs/SlackMessageConfig"
+        },
+        "position": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Position"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "config"
+      ],
+      "title": "SlackMessageNode",
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -372,10 +796,16 @@
       "items": {
         "discriminator": {
           "mapping": {
+            "action.github_comment": "#/$defs/GithubCommentNode",
             "action.http": "#/$defs/HttpNode",
+            "action.slack_message": "#/$defs/SlackMessageNode",
+            "agent": "#/$defs/AgentNode",
+            "approval": "#/$defs/ApprovalNode",
             "condition": "#/$defs/ConditionNode",
             "end": "#/$defs/EndNode",
-            "trigger.manual": "#/$defs/ManualNode"
+            "trigger.github_issue": "#/$defs/GithubIssueNode",
+            "trigger.manual": "#/$defs/ManualNode",
+            "trigger.schedule": "#/$defs/ScheduleNode"
           },
           "propertyName": "type"
         },
@@ -384,7 +814,25 @@
             "$ref": "#/$defs/ManualNode"
           },
           {
+            "$ref": "#/$defs/GithubIssueNode"
+          },
+          {
+            "$ref": "#/$defs/ScheduleNode"
+          },
+          {
             "$ref": "#/$defs/HttpNode"
+          },
+          {
+            "$ref": "#/$defs/GithubCommentNode"
+          },
+          {
+            "$ref": "#/$defs/SlackMessageNode"
+          },
+          {
+            "$ref": "#/$defs/AgentNode"
+          },
+          {
+            "$ref": "#/$defs/ApprovalNode"
           },
           {
             "$ref": "#/$defs/ConditionNode"

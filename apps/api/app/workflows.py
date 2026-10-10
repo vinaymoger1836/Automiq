@@ -13,7 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from app.auth import Db, UserDep, membership, require_csrf
 from app.config import get_settings
 from app.graph import EMPTY_GRAPH, Diagnostic, Graph, validate_graph
-from app.models import AuditLog, Membership, User, Workflow, WorkflowVersion, Workspace
+from app.models import AuditLog, Integration, Membership, User, Workflow, WorkflowVersion, Workspace
 
 router = APIRouter(prefix="/api/v1", tags=["workflows"])
 
@@ -376,6 +376,45 @@ async def publish(
         raise HTTPException(status_code=409, detail="Archived workflow or draft revision conflict")
     graph = Graph.model_validate(workflow.draft_graph)
     diagnostics = runnable_diagnostics(graph)
+    for node in graph.nodes:
+        integration_id: uuid.UUID | None
+        if node.type == "action.github_comment":
+            provider = "github"
+            integration_id = node.config.integration_id
+        elif node.type == "action.slack_message":
+            provider = "slack"
+            integration_id = node.config.integration_id
+        elif node.type == "agent" and node.config.allowed_tools:
+            provider = "github"
+            integration_id = node.config.github_integration_id
+        else:
+            continue
+        integration = await db.scalar(
+            select(Integration).where(
+                Integration.id == integration_id,
+                Integration.workspace_id == ws,
+                Integration.provider == provider,
+                Integration.revoked_at.is_(None),
+            )
+        )
+        if integration is None:
+            diagnostics.append(
+                Diagnostic(
+                    code="invalid_integration",
+                    message="Node needs an active integration in this workspace",
+                    node_id=node.id,
+                )
+            )
+        if node.type == "action.github_comment" and not any(
+            item.type == "trigger.github_issue" for item in graph.nodes
+        ):
+            diagnostics.append(
+                Diagnostic(
+                    code="invalid_trigger",
+                    message="GitHub comment action needs a GitHub issue trigger",
+                    node_id=node.id,
+                )
+            )
     if diagnostics:
         raise HTTPException(status_code=422, detail=[item.model_dump() for item in diagnostics])
     canonical = json.dumps(graph.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))

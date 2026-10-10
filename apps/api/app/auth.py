@@ -17,12 +17,13 @@ from app.db import session_factory
 from app.models import Membership, User
 
 Role = Literal["owner", "editor", "viewer"]
-Permission = Literal["read", "write", "manage", "run"]
+Permission = Literal["read", "write", "manage", "run", "approve"]
 ALLOWED: dict[Permission, set[Role]] = {
     "read": {"owner", "editor", "viewer"},
     "write": {"owner", "editor"},
     "manage": {"owner"},
     "run": {"owner", "editor"},
+    "approve": {"owner"},
 }
 
 

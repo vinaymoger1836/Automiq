@@ -17,7 +17,7 @@ from starlette.responses import StreamingResponse
 
 from app.auth import Db, UserDep, membership, require_csrf
 from app.db import session_factory
-from app.models import RunEvent, RunStartOutbox, StepRun, Workflow, WorkflowRun
+from app.models import RunEvent, RunStartOutbox, StepRun, Workflow, WorkflowRun, WorkflowVersion
 
 router = APIRouter(prefix="/api/v1", tags=["runs"])
 logger = logging.getLogger(__name__)
@@ -30,6 +30,12 @@ class ManualRunInput(BaseModel):
     def bound_input(self) -> "ManualRunInput":
         if len(self.model_dump_json()) > 16_000:
             raise ValueError("Input exceeds 16 KB")
+        if any(
+            word in key.lower()
+            for key in self.payload
+            for word in ("secret", "token", "password", "credential", "authorization")
+        ):
+            raise ValueError("Manual input cannot contain secret-like fields")
         return self
 
 
@@ -119,6 +125,13 @@ async def start_run(
         raise HTTPException(status_code=404, detail="Workflow not found")
     if workflow.status != "active" or workflow.published_version_id is None:
         raise HTTPException(status_code=409, detail="Publish an active workflow before running")
+    version = await db.get(WorkflowVersion, workflow.published_version_id)
+    if version is None or not any(
+        node["type"] == "trigger.manual" for node in version.graph_json["nodes"]
+    ):
+        raise HTTPException(
+            status_code=409, detail="Published workflow does not have a manual trigger"
+        )
     payload = body.model_dump(mode="json")
     request_hash = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
     existing = await db.scalar(

@@ -33,6 +33,7 @@ id_ed25519*
 # Dependencies, caches, and build output
 .venv/
 .uv-cache/
+.pnpm-store/
 .tox/
 *.egg-info/
 __pycache__/
@@ -78,3 +79,5 @@ Desktop.ini
 *.swp
 *.swo
 *~
+
+phase-planning.md

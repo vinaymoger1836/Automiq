@@ -1,0 +1,13 @@
+services:
+  api:
+    environment:
+      APP_ENV: test
+      INTEGRATION_ENCRYPTION_KEY: ${INTEGRATION_ENCRYPTION_KEY:?Generate an ephemeral 32-byte base64 key}
+      INTEGRATION_PROVIDER_MODE: fake
+      INTEGRATION_FAKE_RATE_LIMIT_FIRST: "true"
+  worker:
+    environment:
+      APP_ENV: test
+      INTEGRATION_ENCRYPTION_KEY: ${INTEGRATION_ENCRYPTION_KEY:?Generate an ephemeral 32-byte base64 key}
+      INTEGRATION_PROVIDER_MODE: fake
+      INTEGRATION_FAKE_RATE_LIMIT_FIRST: "true"

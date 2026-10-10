@@ -1,5 +1,6 @@
 export type Role = "owner" | "editor" | "viewer";
-export type NodeKind = "trigger.manual" | "action.http" | "condition" | "end";
+export type NodeKind = "trigger.manual" | "trigger.github_issue" | "trigger.schedule" |
+  "action.http" | "action.github_comment" | "action.slack_message" | "agent" | "approval" | "condition" | "end";
 export type Scalar = string | number | boolean | null;
 export type GraphNode = {
   id: string;

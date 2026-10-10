@@ -19,6 +19,16 @@ class Settings(BaseSettings):
     web_origin: str = Field(min_length=1)
     session_secret: SecretStr = Field(min_length=16)
     encryption_key_ref: str = Field(min_length=1)
+    integration_encryption_key: SecretStr = SecretStr("")
+    integration_keyring: SecretStr = SecretStr("")
+    integration_active_key_version: int = Field(default=1, ge=1)
+    integration_provider_mode: str = "real"
+    integration_fake_rate_limit_first: bool = False
+    llm_provider_mode: str = "fake"
+    openai_api_key: SecretStr = SecretStr("")
+    openai_model: str = ""
+    openai_input_usd_per_million: int = Field(default=0, ge=0)
+    openai_output_usd_per_million: int = Field(default=0, ge=0)
     otel_exporter_otlp_endpoint: str = ""
     oidc_issuer: str = ""
     oidc_client_id: str = ""
@@ -31,6 +41,23 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def production_auth_config(self) -> "Settings":
+        if self.llm_provider_mode not in {"fake", "openai"} or (
+            self.llm_provider_mode == "fake" and self.app_env not in {"development", "test"}
+        ):
+            raise ValueError("Fake LLM provider requires a local or test environment")
+        if self.llm_provider_mode == "openai" and (
+            not self.openai_api_key.get_secret_value()
+            or not self.openai_model
+            or not self.openai_input_usd_per_million
+            or not self.openai_output_usd_per_million
+        ):
+            raise ValueError("OpenAI provider requires model, key and pricing configuration")
+        if self.integration_provider_mode not in {"real", "fake"} or (
+            self.integration_provider_mode == "fake" and self.app_env not in {"development", "test"}
+        ):
+            raise ValueError("Fake integration providers require a local or test environment")
+        if self.integration_fake_rate_limit_first and self.integration_provider_mode != "fake":
+            raise ValueError("Fake rate limiting requires a fake provider")
         if self.app_env == "production" and (
             not self.oidc_issuer.startswith("https://")
             or not self.api_public_url.startswith("https://")

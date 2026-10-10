@@ -2,11 +2,20 @@
 
 import asyncio
 import uuid
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from app.db import session_factory
 from app.graph import Graph, HttpConfig
-from app.models import ActionEffect, RunEvent, StepRun, WorkflowRun, WorkflowVersion
+from app.models import (
+    ActionEffect,
+    Approval,
+    IssueContent,
+    RunEvent,
+    StepRun,
+    WorkflowRun,
+    WorkflowVersion,
+)
 from pydantic import ValidationError
 from sqlalchemy import func, select
 from temporalio import activity
@@ -191,3 +200,121 @@ async def execute_https_action(command: dict[str, Any]) -> dict[str, Any]:
             "HTTPS action failed", type=exc.code, non_retryable=not exc.retryable
         ) from None
     return {"output": output, "attempts": attempt}
+
+
+@activity.defn(name="execute_provider_action")
+async def execute_provider_activity(command: dict[str, Any]) -> dict[str, Any]:
+    from orchestrator.providers import ProviderError, execute_provider_action
+
+    try:
+        return await execute_provider_action(command)
+    except ProviderError as exc:
+        attempt = activity.info().attempt
+        run_id = str(command["run_id"])
+        node_id = str(command["node_id"])
+        await project_event(
+            {
+                "run_id": run_id,
+                "type": "step.failed",
+                "event_key": f"{node_id}:failed:{attempt}",
+                "node_id": node_id,
+                "attempt": attempt,
+                "error": exc.code,
+            }
+        )
+        if exc.retryable and attempt < 3:
+            await project_event(
+                {
+                    "run_id": run_id,
+                    "type": "step.running",
+                    "event_key": f"{node_id}:running:{attempt + 1}",
+                    "node_id": node_id,
+                    "attempt": attempt + 1,
+                }
+            )
+        raise ApplicationError(
+            "Provider action failed",
+            type=exc.code,
+            non_retryable=not exc.retryable,
+            next_retry_delay=timedelta(seconds=exc.retry_after) if exc.retry_after else None,
+        ) from None
+
+
+@activity.defn(name="execute_agent")
+async def execute_agent(command: dict[str, Any]) -> dict[str, Any]:
+    from app.integration_crypto import decrypt_credentials
+
+    from orchestrator.agent import AgentFailure, run_agent
+
+    try:
+        source = dict(command["payload"])
+        run_id = uuid.UUID(command["run_id"])
+        async with session_factory()() as db:
+            run = await db.get(WorkflowRun, run_id)
+            content = await db.get(IssueContent, run_id)
+            if run is None:
+                raise AgentFailure("run_missing")
+            if content is not None:
+                if content.workspace_id != run.workspace_id:
+                    raise AgentFailure("input_unavailable")
+                source.update(
+                    decrypt_credentials(
+                        run.workspace_id,
+                        run_id,
+                        "github_issue",
+                        content.encrypted_content,
+                        content.key_version,
+                    )
+                )
+        return await run_agent(command["run_id"], command["config"], source)
+    except AgentFailure as exc:
+        await project_event(
+            {
+                "run_id": command["run_id"],
+                "type": "step.failed",
+                "event_key": f"{command['node_id']}:failed:1",
+                "node_id": command["node_id"],
+                "error": exc.code,
+            }
+        )
+        raise ApplicationError("Agent failed", type=exc.code, non_retryable=True) from None
+
+
+@activity.defn(name="open_approval")
+async def open_approval(command: dict[str, Any]) -> str:
+    run_id = uuid.UUID(command["run_id"])
+    node_id = command["node_id"]
+    async with session_factory()() as db:
+        run = await db.get(WorkflowRun, run_id, with_for_update=True)
+        if run is None:
+            raise ApplicationError("Run missing", non_retryable=True)
+        row = await db.scalar(
+            select(Approval).where(Approval.run_id == run_id, Approval.node_id == node_id)
+        )
+        if row is None:
+            row = Approval(
+                workspace_id=run.workspace_id,
+                run_id=run_id,
+                node_id=node_id,
+                title=command["title"],
+                status="pending",
+                expires_at=datetime.now(UTC) + timedelta(seconds=command["timeout_seconds"]),
+            )
+            db.add(row)
+            await db.flush()
+        await db.commit()
+        return str(row.id)
+
+
+@activity.defn(name="approval_status")
+async def approval_status(command: dict[str, Any]) -> str:
+    async with session_factory()() as db:
+        row = await db.get(Approval, uuid.UUID(command["approval_id"]), with_for_update=True)
+        if row is None:
+            raise ApplicationError("Approval missing", non_retryable=True)
+        if row.status == "pending" and (
+            command.get("expire") or datetime.now(UTC) >= row.expires_at
+        ):
+            row.status = "expired"
+            await db.commit()
+        return row.status

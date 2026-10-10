@@ -10,10 +10,14 @@ import {
 import type { Graph, GraphEdge, GraphNode, NodeKind, Run } from "@/lib/studio-api";
 
 const labels: Record<NodeKind, string> = {
-  "trigger.manual": "Manual trigger", "action.http": "HTTP action", condition: "Condition", end: "End",
+  "trigger.manual": "Manual trigger", "trigger.github_issue": "GitHub issue", "trigger.schedule": "Schedule",
+  "action.http": "HTTP action", "action.github_comment": "GitHub comment",
+  "action.slack_message": "Slack message", agent: "AI agent", approval: "Approval", condition: "Condition", end: "End",
 };
 const initials: Record<NodeKind, string> = {
-  "trigger.manual": "TR", "action.http": "HT", condition: "IF", end: "EN",
+  "trigger.manual": "TR", "trigger.github_issue": "GH", "trigger.schedule": "SC",
+  "action.http": "HT", "action.github_comment": "GH", "action.slack_message": "SL",
+  agent: "AI", approval: "OK", condition: "IF", end: "EN",
 };
 
 type FlowData = { label: string; kind: NodeKind; status: string; selected: boolean } & Record<string, unknown>;
@@ -21,7 +25,7 @@ type FlowNode = Node<FlowData, "workflow">;
 
 function WorkflowNode({ data }: NodeProps<FlowNode>) {
   return <div className={`flow-node flow-${data.kind.replace(".", "-")} state-${data.status} ${data.selected ? "selected" : ""}`}>
-    {data.kind !== "trigger.manual" && <Handle type="target" position={Position.Left} />}
+    {!data.kind.startsWith("trigger.") && <Handle type="target" position={Position.Left} />}
     <div className="flow-node-top"><span className="flow-node-icon">{initials[data.kind]}</span><span className="flow-node-kind">{data.kind.replace(".", " / ")}</span></div>
     <strong>{data.label}</strong>
     <span className="flow-node-state">{data.status === "idle" ? "Ready to configure" : data.status}</span>
@@ -36,11 +40,21 @@ function WorkflowNode({ data }: NodeProps<FlowNode>) {
 const nodeTypes = { workflow: WorkflowNode };
 
 function newNode(kind: NodeKind, graph: Graph, position: { x: number; y: number }): GraphNode {
-  const stem = kind === "trigger.manual" ? "start" : kind === "action.http" ? "action" : kind === "condition" ? "route" : "end";
+  const stem = kind.startsWith("trigger.") ? "start" : kind.startsWith("action.") ? "action" : kind === "agent" ? "agent" : kind === "approval" ? "approval" : kind === "condition" ? "route" : "end";
   let index = 1;
   while (graph.nodes.some((node) => node.id === `${stem}_${index}`)) index++;
   const config = kind === "condition" ? { expression: { path: "trigger.payload.flag", operator: "eq", value: true } } :
-    kind === "action.http" ? { operation: "mock", mock_output: { ok: true } } : {};
+    kind === "action.http" ? { operation: "mock", mock_output: { ok: true } } :
+    kind === "action.github_comment" ? { integration_id: "00000000-0000-0000-0000-000000000000", body: "Thanks for reporting this issue." } :
+    kind === "action.slack_message" ? { integration_id: "00000000-0000-0000-0000-000000000000", channel: "#alerts", text: "New issue received." } : {};
+  if (kind === "agent") return { id: `${stem}_${index}`, type: kind, config: {
+    model_profile: "fake", instructions: "Classify the issue severity as critical or normal.",
+    allowed_tools: [], max_tool_calls: 1, max_duration_seconds: 30,
+    max_input_tokens: 2000, max_output_tokens: 300, max_cost_microusd: 100000,
+    input_schema: { type: "object", properties: {}, required: [] },
+    output_schema: { type: "object", properties: { severity: "string", reason: "string" }, required: ["severity", "reason"] },
+  }, position };
+  if (kind === "approval") return { id: `${stem}_${index}`, type: kind, config: { title: "Review sensitive action", timeout_seconds: 3600 }, position };
   return { id: `${stem}_${index}`, type: kind, config, position };
 }
 
@@ -48,7 +62,7 @@ function edgeIssue(graph: Graph, source: string, target: string, handle?: string
   const from = graph.nodes.find((node) => node.id === source);
   const to = graph.nodes.find((node) => node.id === target);
   if (!from || !to || source === target) return "Choose two different nodes.";
-  if (from.type === "end" || to.type === "trigger.manual") return "This node cannot have that connection.";
+  if (from.type === "end" || to.type.startsWith("trigger.")) return "This node cannot have that connection.";
   if (graph.edges.some((edge) => edge.target === target)) return "Each node can have only one incoming edge.";
   if (from.type === "condition") {
     if (handle !== "true" && handle !== "false") return "Choose the true or false branch.";
@@ -136,8 +150,8 @@ function CanvasInner({ graph, onChange, onSelect, selectedId, readOnly, run, the
     if (readOnly) return;
     const kind = event.dataTransfer.getData("application/automiq-node") as NodeKind;
     if (!Object.hasOwn(labels, kind)) return;
-    if (kind === "trigger.manual" && graph.nodes.some((node) => node.type === kind)) {
-      onNotice("A workflow can have only one manual trigger."); return;
+    if (kind.startsWith("trigger.") && graph.nodes.some((node) => node.type.startsWith("trigger."))) {
+      onNotice("A workflow can have only one trigger. Select the existing trigger to change it."); return;
     }
     onChange({ ...graph, nodes: [...graph.nodes, newNode(kind, graph,
       screenToFlowPosition({ x: event.clientX, y: event.clientY }))] });
