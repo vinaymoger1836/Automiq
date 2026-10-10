@@ -1,0 +1,10 @@
+{
+  "action": "opened",
+  "repository": { "full_name": "synthetic/repo" },
+  "issue": {
+    "number": 43,
+    "state": "open",
+    "title": "Synthetic wording suggestion",
+    "body": "Please clarify the example help text. This is synthetic demo text."
+  }
+}

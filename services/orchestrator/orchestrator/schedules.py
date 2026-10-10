@@ -32,6 +32,8 @@ logger = logging.getLogger(__name__)
 @activity.defn(name="create_scheduled_run")
 async def create_scheduled_run(command: dict[str, str]) -> str | None:
     from app.limits import workspace_has_capacity
+    from app.observability import current_traceparent
+    from opentelemetry import trace
 
     trigger_id = uuid.UUID(command["trigger_id"])
     fire_id = command["fire_id"]
@@ -61,6 +63,9 @@ async def create_scheduled_run(command: dict[str, str]) -> str | None:
             return None
         run_id = uuid.uuid4()
         input_json = {"payload": {"scheduled_at": command["started_at"]}}
+        with trace.get_tracer(__name__).start_as_current_span("schedule.fire") as span:
+            span.set_attribute("run.id", str(run_id))
+            traceparent = current_traceparent()
         db.add(
             WorkflowRun(
                 id=run_id,
@@ -72,6 +77,7 @@ async def create_scheduled_run(command: dict[str, str]) -> str | None:
                 request_hash=hashlib.sha256(
                     json.dumps(input_json, sort_keys=True).encode()
                 ).hexdigest(),
+                traceparent=traceparent,
                 input_json=input_json,
                 status="queued",
             )

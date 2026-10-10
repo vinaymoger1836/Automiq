@@ -25,8 +25,13 @@ def p95(values: list[float]) -> float:
 
 
 async def mutate(
-    client: httpx.AsyncClient, path: str, csrf: str, body: dict[str, Any],
-    *, method: str = "POST", key: str | None = None,
+    client: httpx.AsyncClient,
+    path: str,
+    csrf: str,
+    body: dict[str, Any],
+    *,
+    method: str = "POST",
+    key: str | None = None,
 ) -> httpx.Response:
     headers = {"Origin": ORIGIN, "X-CSRF-Token": csrf}
     if key:
@@ -35,15 +40,19 @@ async def mutate(
 
 
 async def publish(
-    client: httpx.AsyncClient, ws: str, csrf: str, name: str, trigger_type: str,
+    client: httpx.AsyncClient,
+    ws: str,
+    csrf: str,
+    name: str,
+    trigger_type: str,
 ) -> str:
-    created = await mutate(
-        client, f"/api/v1/workspaces/{ws}/workflows", csrf, {"name": name}
-    )
+    created = await mutate(client, f"/api/v1/workspaces/{ws}/workflows", csrf, {"name": name})
     created.raise_for_status()
     path = f"/api/v1/workspaces/{ws}/workflows/{created.json()['id']}"
     saved = await mutate(
-        client, f"{path}/draft", csrf,
+        client,
+        f"{path}/draft",
+        csrf,
         {
             "revision": created.json()["draft_revision"],
             "graph": {
@@ -59,7 +68,9 @@ async def publish(
     )
     saved.raise_for_status()
     published = await mutate(
-        client, f"{path}/publish", csrf,
+        client,
+        f"{path}/publish",
+        csrf,
         {"revision": saved.json()["draft_revision"]},
     )
     published.raise_for_status()
@@ -91,7 +102,9 @@ async def main() -> None:
         csrf = (await client.get("/api/v1/me")).json()["csrf_token"]
         nonce = uuid.uuid4().hex[:10]
         workspace = await mutate(
-            client, "/api/v1/workspaces", csrf,
+            client,
+            "/api/v1/workspaces",
+            csrf,
             {"name": f"Phase 6 load {nonce}", "slug": f"phase6-load-{nonce}"},
         )
         workspace.raise_for_status()
@@ -100,16 +113,22 @@ async def main() -> None:
         github = await publish(client, ws, csrf, "Webhook load", "trigger.github_issue")
         secret = f"local-only-load-{uuid.uuid4().hex}"
         integration = await mutate(
-            client, f"/api/v1/workspaces/{ws}/integrations", csrf,
+            client,
+            f"/api/v1/workspaces/{ws}/integrations",
+            csrf,
             {
-                "provider": "github", "display_name": "Synthetic load",
-                "token": "local-only-load-token", "webhook_secret": secret,
+                "provider": "github",
+                "display_name": "Synthetic load",
+                "token": "local-only-load-token",
+                "webhook_secret": secret,
                 "repository": "synthetic/repo",
             },
         )
         integration.raise_for_status()
         binding = await mutate(
-            client, f"{github}/triggers/github", csrf,
+            client,
+            f"{github}/triggers/github",
+            csrf,
             {"integration_id": integration.json()["id"]},
         )
         binding.raise_for_status()
@@ -144,9 +163,11 @@ async def main() -> None:
 
         raw = json.dumps(
             {
-                "action": "opened", "repository": {"full_name": "synthetic/repo"},
+                "action": "opened",
+                "repository": {"full_name": "synthetic/repo"},
                 "issue": {"number": 42, "state": "open", "title": "Synthetic load", "body": ""},
-            }, separators=(",", ":"),
+            },
+            separators=(",", ":"),
         ).encode()
         signature = "sha256=" + hmac.new(secret.encode(), raw, hashlib.sha256).hexdigest()
 
@@ -176,7 +197,9 @@ async def main() -> None:
         webhook_wall = time.perf_counter() - webhook_started
 
     report = {
-        "status": "passed" if read_failures == 0 and len(run_ids) == CONCURRENT and len(hook_ids) == CONCURRENT else "failed",
+        "status": "passed"
+        if read_failures == 0 and len(run_ids) == CONCURRENT and len(hook_ids) == CONCURRENT
+        else "failed",
         "environment": {
             "python": platform.python_version(),
             "os": platform.system(),
@@ -184,15 +207,21 @@ async def main() -> None:
             "provider": "fake",
             "concurrency": CONCURRENT,
         },
-        "reads": {"requests": READS, "failures": read_failures, "p95_ms": round(p95(read_times) * 1000, 1)},
+        "reads": {
+            "requests": READS,
+            "failures": read_failures,
+            "p95_ms": round(p95(read_times) * 1000, 1),
+        },
         "manual_runs": {
-            "requests": CONCURRENT, "completed": len(run_ids),
+            "requests": CONCURRENT,
+            "completed": len(run_ids),
             "failures": CONCURRENT - len(run_ids),
             "accept_p95_ms": round(p95([elapsed for _, elapsed, _ in runs]) * 1000, 1),
             "throughput_per_second": round(len(run_ids) / run_wall, 2),
         },
         "signed_webhooks": {
-            "requests": CONCURRENT, "completed": len(hook_ids),
+            "requests": CONCURRENT,
+            "completed": len(hook_ids),
             "failures": CONCURRENT - len(hook_ids),
             "accept_p95_ms": round(p95([elapsed for _, elapsed, _ in hooks]) * 1000, 1),
             "throughput_per_second": round(len(hook_ids) / webhook_wall, 2),

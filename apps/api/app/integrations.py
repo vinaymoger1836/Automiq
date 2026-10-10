@@ -33,7 +33,7 @@ from app.models import (
     WorkflowRun,
     WorkflowVersion,
 )
-from app.observability import WEBHOOK_DEDUPLICATED
+from app.observability import WEBHOOK_DEDUPLICATED, current_traceparent
 from app.runs import redact
 
 router = APIRouter(prefix="/api/v1", tags=["integrations"])
@@ -689,6 +689,7 @@ async def github_webhook(public_id: str, request: Request, db: Db) -> DeliveryOu
             request_hash=hashlib.sha256(
                 json.dumps(input_json, sort_keys=True).encode()
             ).hexdigest(),
+            traceparent=current_traceparent(),
             input_json=input_json,
             status="queued",
         )

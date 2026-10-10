@@ -25,8 +25,21 @@ from temporalio.exceptions import ApplicationError
 logger = logging.getLogger(__name__)
 
 
+async def run_trace_context(run_id: str) -> Any:
+    from app.observability import trace_context
+
+    async with session_factory()() as db:
+        parent = await db.scalar(
+            select(WorkflowRun.traceparent).where(WorkflowRun.id == uuid.UUID(run_id))
+        )
+    return trace_context(parent)
+
+
 @activity.defn(name="load_run")
 async def load_run(run_id: str) -> dict[str, Any]:
+    from app.observability import trace_context
+    from opentelemetry import trace
+
     async with session_factory()() as db:
         run = await db.get(WorkflowRun, uuid.UUID(run_id))
         if run is None:
@@ -38,18 +51,27 @@ async def load_run(run_id: str) -> dict[str, Any]:
             graph = Graph.model_validate(version.graph_json)
         except ValidationError:
             raise ApplicationError("Published graph is incompatible", non_retryable=True) from None
-        return {
-            "graph": graph.model_dump(mode="json"),
-            "input": run.input_json,
-            "version_id": str(version.id),
-        }
+        with trace.get_tracer(__name__).start_as_current_span(
+            "activity.load_run", context=trace_context(run.traceparent)
+        ) as span:
+            span.set_attribute("run.id", run_id)
+            return {
+                "graph": graph.model_dump(mode="json"),
+                "input": run.input_json,
+                "version_id": str(version.id),
+            }
 
 
 @activity.defn(name="project_event")
 async def project_event(command: dict[str, Any]) -> None:
+    from app.observability import (
+        STEP_DURATION,
+        WORKFLOW_DURATION,
+        WORKFLOW_RUNS,
+        event,
+        trace_context,
+    )
     from opentelemetry import trace
-
-    from app.observability import STEP_DURATION, WORKFLOW_DURATION, WORKFLOW_RUNS, event
 
     run_id = uuid.UUID(command["run_id"])
     kind = command["type"]
@@ -123,17 +145,19 @@ async def project_event(command: dict[str, Any]) -> None:
                 payload_json=payload,
             )
         )
-        with trace.get_tracer(__name__).start_as_current_span("projection.write") as span:
+        with trace.get_tracer(__name__).start_as_current_span(
+            "projection.write", context=trace_context(run.traceparent)
+        ) as span:
             span.set_attribute("run.id", str(run_id))
             span.set_attribute("event.type", kind)
             await db.commit()
+            event(logger, "run.projection", run_id=str(run_id), node_id=node_id, status=kind)
         if terminal_run:
             WORKFLOW_RUNS.labels(run.status).inc()
             if run_duration is not None:
                 WORKFLOW_DURATION.observe(run_duration)
         if step_duration is not None:
             STEP_DURATION.labels(kind.split(".", 1)[1]).observe(step_duration)
-        event(logger, "run.projection", run_id=str(run_id), node_id=node_id, status=kind)
 
 
 @activity.defn(name="execute_mock_action")
@@ -198,6 +222,7 @@ async def execute_mock_action(command: dict[str, Any]) -> dict[str, Any]:
 @activity.defn(name="execute_https_action")
 async def execute_https_action(command: dict[str, Any]) -> dict[str, Any]:
     from app.observability import ACTIVITY_RETRIES
+    from opentelemetry import trace
 
     # Keep network-client imports out of Temporal's deterministic workflow sandbox.
     from orchestrator.http_connector import HttpActionError, execute_https_get
@@ -210,7 +235,12 @@ async def execute_https_action(command: dict[str, Any]) -> dict[str, Any]:
     if attempt > 1:
         ACTIVITY_RETRIES.labels("https").inc()
     try:
-        output = await execute_https_get(config)
+        with trace.get_tracer(__name__).start_as_current_span(
+            "external.http", context=await run_trace_context(str(command["run_id"]))
+        ) as span:
+            span.set_attribute("run.id", str(command["run_id"]))
+            span.set_attribute("node.id", str(command["node_id"]))
+            output = await execute_https_get(config)
     except HttpActionError as exc:
         run_id = str(command["run_id"])
         node_id = str(command["node_id"])
@@ -243,13 +273,20 @@ async def execute_https_action(command: dict[str, Any]) -> dict[str, Any]:
 @activity.defn(name="execute_provider_action")
 async def execute_provider_activity(command: dict[str, Any]) -> dict[str, Any]:
     from app.observability import ACTIVITY_RETRIES
+    from opentelemetry import trace
 
     from orchestrator.providers import ProviderError, execute_provider_action
 
     try:
         if activity.info().attempt > 1:
             ACTIVITY_RETRIES.labels("provider").inc()
-        return await execute_provider_action(command)
+        with trace.get_tracer(__name__).start_as_current_span(
+            "provider.action", context=await run_trace_context(str(command["run_id"]))
+        ) as span:
+            span.set_attribute("run.id", str(command["run_id"]))
+            span.set_attribute("node.id", str(command["node_id"]))
+            span.set_attribute("provider.action", str(command["kind"]))
+            return await execute_provider_action(command)
     except ProviderError as exc:
         attempt = activity.info().attempt
         run_id = str(command["run_id"])
@@ -284,10 +321,9 @@ async def execute_provider_activity(command: dict[str, Any]) -> dict[str, Any]:
 
 @activity.defn(name="execute_agent")
 async def execute_agent(command: dict[str, Any]) -> dict[str, Any]:
-    from opentelemetry import trace
-
     from app.integration_crypto import decrypt_credentials
-    from app.observability import AGENT_COST, AGENT_TOKENS
+    from app.observability import AGENT_COST, AGENT_TOKENS, trace_context
+    from opentelemetry import trace
 
     from orchestrator.agent import AgentFailure, run_agent
 
@@ -311,7 +347,9 @@ async def execute_agent(command: dict[str, Any]) -> dict[str, Any]:
                         content.key_version,
                     )
                 )
-        with trace.get_tracer(__name__).start_as_current_span("agent.invoke") as span:
+        with trace.get_tracer(__name__).start_as_current_span(
+            "agent.invoke", context=trace_context(run.traceparent)
+        ) as span:
             span.set_attribute("run.id", command["run_id"])
             span.set_attribute("model.profile", command["config"]["model_profile"])
             result = await run_agent(command["run_id"], command["config"], source)

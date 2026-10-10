@@ -188,6 +188,7 @@ class WorkflowRun(Base):
     temporal_workflow_id: Mapped[str] = mapped_column(String(80), nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
     request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    traceparent: Mapped[str | None] = mapped_column(String(55))
     status: Mapped[str] = mapped_column(String(16), nullable=False, server_default=text("'queued'"))
     input_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     error: Mapped[str | None] = mapped_column(String(255))

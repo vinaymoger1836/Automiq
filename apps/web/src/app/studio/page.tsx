@@ -28,6 +28,16 @@ const palette: { kind: NodeKind; hint: string }[] = [
   { kind: "end", hint: "Finish a path" },
 ];
 
+const starterGraph: Graph = {
+  schema_version: "1.0",
+  nodes: [
+    { id: "start", type: "trigger.manual", config: {}, position: { x: 80, y: 180 } },
+    { id: "action_1", type: "action.http", config: { operation: "mock", mock_output: { ok: true } }, position: { x: 380, y: 180 } },
+    { id: "end", type: "end", config: {}, position: { x: 680, y: 180 } },
+  ],
+  edges: [{ source: "start", target: "action_1" }, { source: "action_1", target: "end" }],
+};
+
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : "Something went wrong";
 }
@@ -67,6 +77,7 @@ export default function StudioPage() {
   const [busy, setBusy] = useState(false);
   const [workspaceName, setWorkspaceName] = useState("");
   const [workflowName, setWorkflowName] = useState("");
+  const [workflowTemplate, setWorkflowTemplate] = useState<"blank" | "starter">("blank");
   const [members, setMembers] = useState<Member[]>([]);
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [triggers, setTriggers] = useState<Trigger[]>([]);
@@ -335,8 +346,12 @@ export default function StudioPage() {
     if (!workspaceId || !me) return;
     const created = await api<Workflow>(pathFor(workspaceId), { method: "POST",
       body: JSON.stringify({ name: workflowName.trim() }) }, me.csrf_token);
-    setWorkflows((items) => [created, ...items]); setWorkflowName("");
-    await openWorkflow(workspaceId, created.id); announce("Draft created. Add or connect nodes to begin.", "success");
+    const workflow = workflowTemplate === "starter" ? await api<Workflow>(`${pathFor(workspaceId, created.id)}/draft`, {
+      method: "PUT", body: JSON.stringify({ revision: created.draft_revision, graph: starterGraph }),
+    }, me.csrf_token) : created;
+    setWorkflows((items) => [workflow, ...items]); setWorkflowName(""); setWorkflowTemplate("blank");
+    await openWorkflow(workspaceId, workflow.id);
+    announce(workflowTemplate === "starter" ? "Starter draft is ready to publish or customize." : "Draft created. Add or connect nodes to begin.", "success");
   });
   const grantMember = () => void runAction(async () => {
     if (!workspaceId || !me) return;
@@ -481,6 +496,7 @@ export default function StudioPage() {
         {workspace && <><div className="sidebar-section-label workflow-label">WORKFLOWS <span>{workflows.length}</span></div>
           {role !== "viewer" && <form className="sidebar-form" onSubmit={(event) => { event.preventDefault(); createWorkflow(); }}>
             <label htmlFor="workflow-name">Create a workflow</label><div className="inline-input"><input id="workflow-name" value={workflowName} onChange={(event) => setWorkflowName(event.target.value)} placeholder="e.g. Issue triage" maxLength={160} /><button type="submit" disabled={busy || !workflowName.trim()} aria-label="Create workflow">＋</button></div>
+            <label htmlFor="workflow-template">Starting point</label><select id="workflow-template" value={workflowTemplate} onChange={(event) => setWorkflowTemplate(event.target.value as "blank" | "starter")}><option value="blank">Blank canvas</option><option value="starter">Manual → mock action → end</option></select>
           </form>}
           <nav className="workflow-list" aria-label="Workflows">{workflows.length ? workflows.map((item) => <div key={item.id} className={`workflow-list-item ${selected?.id === item.id ? "active" : ""}`}>
             <button type="button" onClick={() => { if (dirty && !window.confirm("Leave this unsaved draft?")) return; void openWorkflow(workspace.id, item.id); }}>
@@ -497,9 +513,14 @@ export default function StudioPage() {
 
       <section className="studio-main">
         {notice && <div className={`studio-notice ${notice.kind}`} role="status"><span>{notice.kind === "error" ? "!" : "✓"}</span>{notice.text}<button type="button" aria-label="Dismiss notice" onClick={() => setNotice(null)}>×</button></div>}
-        {!selected || !graph || !workspace ? <div className="studio-empty"><span className="empty-symbol">◇</span><p className="studio-kicker">YOUR CANVAS AWAITS</p><h1>{workspace ? "Create your first workflow" : "Create a workspace"}</h1><p>{workspace ? "Name a workflow in the sidebar, then connect a trigger, actions, and an end node." : "Workspaces keep your workflows and runs organized with clear access roles."}</p></div> : <>
+        {!selected || !graph || !workspace ? <div className="studio-empty"><span className="empty-symbol">◇</span><p className="studio-kicker">YOUR CANVAS AWAITS</p><h1>{workspace ? "Create your first workflow" : "Create a workspace"}</h1><p>{workspace ? "Name a workflow in the sidebar. Choose the starter to publish and run a working example, or begin with a blank canvas." : "Workspaces keep your workflows and runs organized with clear access roles."}</p></div> : <>
           <div className="studio-heading"><div><p className="studio-kicker">{workspace.name.toUpperCase()} / WORKFLOW BUILDER</p><h1>{selected.name}</h1><div className="heading-meta"><span className={`status-chip ${selected.status}`}>{selected.status}</span><span>Draft revision {selected.draft_revision}</span><span>{latestVersion ? `Published v${latestVersion.version}` : "Not published"}</span>{dirty && <span className="unsaved-dot">Unsaved changes</span>}</div></div>
             <div className="heading-actions"><button type="button" className="studio-secondary" onClick={validate} disabled={!canEdit || busy}>Validate</button><button type="button" className="studio-secondary" onClick={save} disabled={!canEdit || !dirty || busy}>Save draft</button><button type="button" className="studio-primary" onClick={() => setConfirmPublish(true)} disabled={!canEdit || busy || dirty}>Publish <span aria-hidden="true">↗</span></button></div>
+          </div>
+          <div className="studio-overview" aria-label="Workspace overview">
+            <div><span>Workflows</span><strong>{workflows.filter((item) => item.status === "active").length}</strong><small>Active in this workspace</small></div>
+            <div><span>Published</span><strong>{workflows.filter((item) => item.status === "active" && item.published_version_id).length}</strong><small>Ready for a run</small></div>
+            <div><span>Recent runs</span><strong>{recentRuns.length}</strong><small>For this workflow</small></div>
           </div>
           {diagnostics.length > 0 && <div className="diagnostics" role="alert"><strong>Graph needs attention</strong><ul>{diagnostics.map((item, index) => <li key={`${item.code}-${index}`}><span>{item.node_id || "Graph"}</span>{item.message}</li>)}</ul></div>}
           {confirmPublish && <div className="publish-confirm" role="dialog" aria-label="Publish workflow"><div><strong>Publish this draft?</strong><p>A new immutable version will be available for manual runs. Current runs keep their pinned version.</p></div><div><button type="button" className="studio-secondary" onClick={() => setConfirmPublish(false)}>Cancel</button><button type="button" className="studio-primary" onClick={publish} disabled={busy}>Confirm publish</button></div></div>}

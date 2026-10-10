@@ -1,0 +1,10 @@
+{
+  "action": "opened",
+  "repository": { "full_name": "synthetic/repo" },
+  "issue": {
+    "number": 42,
+    "state": "open",
+    "title": "Synthetic service outage",
+    "body": "Critical: the sample checkout cannot complete. This is synthetic demo text."
+  }
+}

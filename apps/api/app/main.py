@@ -90,6 +90,8 @@ async def request_id(request: Request, call_next):  # type: ignore[no-untyped-de
         finally:
             route = request.scope.get("route")
             template = getattr(route, "path", "unmatched")
+            if template.startswith("/api/v1/webhooks/"):
+                span.update_name("webhook.receive")
             span.set_attribute("http.route", template)
             span.set_attribute("http.response.status_code", status)
             HTTP_REQUESTS.labels(request.method, template, str(status)).inc()

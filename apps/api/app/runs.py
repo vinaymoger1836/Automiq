@@ -20,6 +20,7 @@ from app.config import get_settings
 from app.db import session_factory
 from app.limits import admit_request, workspace_has_capacity
 from app.models import RunEvent, RunStartOutbox, StepRun, Workflow, WorkflowRun, WorkflowVersion
+from app.observability import current_traceparent
 
 router = APIRouter(prefix="/api/v1", tags=["runs"])
 logger = logging.getLogger(__name__)
@@ -163,6 +164,7 @@ async def start_run(
         temporal_workflow_id=f"run:{run_id}",
         idempotency_key=idempotency_key,
         request_hash=request_hash,
+        traceparent=current_traceparent(),
         input_json=payload,
         status="queued",
     )

@@ -22,5 +22,5 @@ def session_factory() -> async_sessionmaker[AsyncSession]:
     from app.config import get_settings
 
     return async_sessionmaker(
-        create_async_engine(get_settings().database_url), expire_on_commit=False
+        create_async_engine(get_settings().database_url, pool_pre_ping=True), expire_on_commit=False
     )

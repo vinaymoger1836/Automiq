@@ -86,7 +86,8 @@ async def main() -> None:
 
 
 async def reconcile_outbox(client: Client) -> None:
-    from app.observability import event
+    from app.observability import event, trace_context
+    from opentelemetry import trace
 
     settings = get_settings()
     while True:
@@ -106,16 +107,20 @@ async def reconcile_outbox(client: Client) -> None:
                     outbox, run = row
                     outbox.attempts += 1
                     try:
-                        await asyncio.wait_for(
-                            client.start_workflow(
-                                WorkflowExecution.run,
-                                str(run.id),
-                                id=run.temporal_workflow_id,
-                                task_queue=settings.temporal_task_queue,
-                                id_reuse_policy=WorkflowIDReusePolicy.REJECT_DUPLICATE,
-                            ),
-                            timeout=10,
-                        )
+                        with trace.get_tracer(__name__).start_as_current_span(
+                            "workflow.start", context=trace_context(run.traceparent)
+                        ) as span:
+                            span.set_attribute("run.id", str(run.id))
+                            await asyncio.wait_for(
+                                client.start_workflow(
+                                    WorkflowExecution.run,
+                                    str(run.id),
+                                    id=run.temporal_workflow_id,
+                                    task_queue=settings.temporal_task_queue,
+                                    id_reuse_policy=WorkflowIDReusePolicy.REJECT_DUPLICATE,
+                                ),
+                                timeout=10,
+                            )
                     except WorkflowAlreadyStartedError:
                         outbox.started_at = datetime.now(UTC)
                         outbox.last_error = None

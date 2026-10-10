@@ -1,6 +1,6 @@
 # Automiq
 
-Automiq is a versioned workflow automation engine. A signed-in user can create a workspace, draw and publish a workflow, run it through Temporal, and inspect its progress. PostgreSQL holds workspace and run state; Redis and Temporal are local Compose services. Phase 4 adds signed GitHub issue triggers, schedules, and GitHub/Slack integrations. Phase 5 adds bounded agent classification and durable human approvals; both fake-provider full-stack gates passed locally. HTTP actions use a deterministic mock by default; an operator can opt in to one restricted HTTPS GET destination.
+Automiq is a versioned workflow automation engine. A signed-in user can create a workspace, draw and publish a workflow, run it through Temporal, and inspect its progress. PostgreSQL holds workspace and run state; Redis and Temporal are local Compose services. Phase 4 adds signed GitHub issue triggers, schedules, and GitHub/Slack integrations. Phase 5 adds bounded agent classification and durable human approvals. Phase 6 adds local operations checks, limits, retention, and measured synthetic performance; all three fake-provider phase gates passed locally. HTTP actions use a deterministic mock by default; an operator can opt in to one restricted HTTPS GET destination.
 
 ## Requirements
 
@@ -59,7 +59,7 @@ The [Phase 5 guide](docs/phase5.md) covers the bounded LangGraph agent, encrypte
 
 ### Phase 6 operations
 
-The [Phase 6 guide](docs/phase6.md) covers metrics and traces, run admission limits, retention dry runs, and the synthetic full-stack operations check. `/internal/metrics` requires a configured scrape token; run detail and summary cleanup requires an explicit `--apply`.
+The [Phase 6 guide](docs/phase6.md) covers metrics and traces, run admission limits, retention dry runs, and the synthetic full-stack operations check. The [deployment guide](docs/deployment.md) records setup decisions and API examples. `/internal/metrics` requires a configured scrape token; run detail and summary cleanup requires an explicit `--apply`.
 
 ## Current boundaries
 

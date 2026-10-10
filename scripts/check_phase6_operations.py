@@ -1,6 +1,8 @@
 """Full-stack admission, metrics, tenant boundary, and retention E2E."""
 
 import asyncio
+import hashlib
+import hmac
 import json
 import os
 import platform
@@ -184,6 +186,102 @@ async def main() -> None:
             )
             hidden = await outsider.get(f"/api/v1/workspaces/{ws}/runs/{run_ids[0]}")
             check(hidden.status_code in {403, 404}, "other tenant cannot inspect run")
+
+        secret = f"local-only-phase6-{uuid.uuid4().hex}"
+        integration = await request(
+            owner,
+            "POST",
+            f"/api/v1/workspaces/{ws}/integrations",
+            csrf,
+            {
+                "provider": "github",
+                "display_name": "Synthetic quota provider",
+                "token": "local-only-fake-token",
+                "webhook_secret": secret,
+                "repository": "synthetic/repo",
+            },
+        )
+        check(integration.status_code == 201, "synthetic webhook credential created")
+        webhook_workflow = await request(
+            owner,
+            "POST",
+            f"/api/v1/workspaces/{ws}/workflows",
+            csrf,
+            {"name": "Webhook quota"},
+        )
+        check(webhook_workflow.status_code == 201, "webhook workflow created")
+        hook_base = f"/api/v1/workspaces/{ws}/workflows/{webhook_workflow.json()['id']}"
+        hook_graph = {
+            "schema_version": "1.0",
+            "nodes": [
+                {"id": "start", "type": "trigger.github_issue", "config": {}},
+                {"id": "end", "type": "end", "config": {}},
+            ],
+            "edges": [{"source": "start", "target": "end"}],
+        }
+        hook_saved = await request(
+            owner,
+            "PUT",
+            f"{hook_base}/draft",
+            csrf,
+            {"revision": webhook_workflow.json()["draft_revision"], "graph": hook_graph},
+        )
+        check(hook_saved.status_code == 200, "webhook graph saved")
+        hook_published = await request(
+            owner,
+            "POST",
+            f"{hook_base}/publish",
+            csrf,
+            {"revision": hook_saved.json()["draft_revision"]},
+        )
+        check(hook_published.status_code == 200, "webhook graph published")
+        bound = await request(
+            owner,
+            "POST",
+            f"{hook_base}/triggers/github",
+            csrf,
+            {"integration_id": integration.json()["id"]},
+        )
+        check(bound.status_code == 201, "signed webhook bound")
+        raw = json.dumps(
+            {
+                "action": "opened",
+                "repository": {"full_name": "synthetic/repo"},
+                "issue": {"number": 42, "state": "open", "title": "", "body": ""},
+            },
+            separators=(",", ":"),
+        ).encode()
+        signature = "sha256=" + hmac.new(secret.encode(), raw, hashlib.sha256).hexdigest()
+        first_delivery = str(uuid.uuid4())
+
+        async def deliver(delivery_id: str) -> httpx.Response:
+            return await owner.post(
+                bound.json()["webhook_path"],
+                content=raw,
+                headers={
+                    "X-Hub-Signature-256": signature,
+                    "X-GitHub-Delivery": delivery_id,
+                    "X-GitHub-Event": "issues",
+                    "Content-Type": "application/json",
+                },
+            )
+
+        first_hook = await deliver(first_delivery)
+        check(first_hook.status_code == 202, "first signed delivery admitted")
+        await wait_status(owner, ws, first_hook.json()["run_id"], "succeeded")
+        for _ in range(2):
+            accepted_hook = await deliver(str(uuid.uuid4()))
+            check(accepted_hook.status_code == 202, "signed delivery admitted below quota")
+            await wait_status(owner, ws, accepted_hook.json()["run_id"], "succeeded")
+        limited_hook = await deliver(str(uuid.uuid4()))
+        check(limited_hook.status_code == 429, "signed webhook rate limit enforced")
+        duplicate_hook = await deliver(first_delivery)
+        check(
+            duplicate_hook.status_code == 202
+            and duplicate_hook.json()["duplicate"]
+            and duplicate_hook.json()["run_id"] == first_hook.json()["run_id"],
+            "duplicate webhook remains idempotent above quota",
+        )
 
         os.environ["DATABASE_URL"] = local_database_url()
         os.environ["RUN_DETAIL_RETENTION_DAYS"] = "1"
