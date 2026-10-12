@@ -157,6 +157,14 @@ async def main() -> None:
             and action["output"]["status_id"] == "3000003",
             "version-pinned run updates the requested task through fake Zoho provider",
         )
+        check(
+            action["attempt"] == 2
+            and any(
+                step["node_id"] == "update" and step["error"] == "rate_limited"
+                for step in success["steps"]
+            ),
+            "fake provider rate limit retries with one final task update",
+        )
         rejected = await run({"task_id": "../other-project"})
         check(
             rejected["status"] == "failed"

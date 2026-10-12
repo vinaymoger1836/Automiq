@@ -35,4 +35,6 @@ Push-Location apps/web
 Pop-Location
 ```
 
-Observed on 2026-10-12: API/PostgreSQL/Temporal/fake-provider E2E passed 16 checks, covering configuration rejection, redacted credentials, publication, a task update with a rate-limit retry, invalid task ID, rotation, and revocation. Chromium passed one UI workflow scenario. Light and dark screenshots were reviewed at 375px and 1280px; no horizontal overflow was observed at 375, 768, 1280, and 1440px. Evidence is ignored under `artifacts/e2e/zoho-projects/` (`report.json`, `playwright.xml`, and four screenshots). Live Zoho OAuth and API behavior was not exercised.
+Observed on 2026-10-12: API/PostgreSQL/Temporal/fake-provider E2E passed 17 checks, covering configuration rejection, redacted credentials, publication, a task update with a rate-limit retry, invalid task ID, rotation, and revocation. Chromium passed one UI workflow scenario. Light and dark screenshots were reviewed at 375px and 1280px; no horizontal overflow was observed at 375, 768, 1280, and 1440px. Evidence is ignored under `artifacts/e2e/zoho-projects/` (`report.json`, `playwright.xml`, four screenshots, and sanitized failure notes). Live Zoho OAuth and API behavior was not exercised.
+
+Verification environment: Python 3.12.10, uv 0.12.23, Node 24.15.0, npm 11.12.1, Docker Engine 29.6.2, Compose 5.3.1, Playwright 1.64.0 with Chromium, PostgreSQL 16.6, Temporal 1.27.2, and the deterministic fake integration provider. Ruff, mypy, frontend lint and production build, Alembic upgrade and model parity, and `git diff --check` passed.
