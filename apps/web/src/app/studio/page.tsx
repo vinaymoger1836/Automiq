@@ -5,6 +5,7 @@ import type { DragEvent } from "react";
 import type { Diagnostic, Graph, GraphNode, Me, NodeKind, Role, Run, Version, Workflow, Workspace } from "@/lib/studio-api";
 import { ApiError, api, pathFor } from "@/lib/studio-api";
 import { WorkflowCanvas, edgeIssue, labels, newNode } from "./workflow-canvas";
+import { AppConnectionsPanel, type AppConnection } from "./app-connections";
 import "./studio.css";
 
 type RunSummary = { run_id: string; version_id: string; status: string; created_at: string };
@@ -12,16 +13,18 @@ type TimelineEvent = { id: number; type: string; payload: Record<string, unknown
 type Notice = { kind: "success" | "error" | "info"; text: string };
 type Member = { user_id: string; email: string; role: Role };
 type Integration = { id: string; provider: "github" | "slack"; display_name: string; key_version: number; credential_version: number; revoked_at: string | null; can_configure: boolean };
-type Trigger = { id: string; type: "github.issue" | "schedule"; version_id: string; integration_id: string | null; enabled: boolean; webhook_path: string | null; webhook_url: string | null; config: Record<string, string> };
+type Trigger = { id: string; type: "github.issue" | "schedule" | "app.event"; version_id: string; integration_id: string | null; enabled: boolean; webhook_path: string | null; webhook_url: string | null; config: Record<string, string | number> };
 type Approval = { id: string; run_id: string; node_id: string; title: string; status: string; created_at: string; expires_at: string; decided_at: string | null; can_approve: boolean };
 
 const palette: { kind: NodeKind; hint: string }[] = [
   { kind: "trigger.manual", hint: "Start here" },
   { kind: "trigger.github_issue", hint: "Signed webhook" },
   { kind: "trigger.schedule", hint: "Timed run" },
+  { kind: "trigger.app_event", hint: "Signed app event" },
   { kind: "action.http", hint: "Mock action" },
   { kind: "action.github_comment", hint: "Reply to issue" },
   { kind: "action.slack_message", hint: "Notify a channel" },
+  { kind: "action.app_callback", hint: "Notify custom app" },
   { kind: "agent", hint: "Bounded classification" },
   { kind: "approval", hint: "Human checkpoint" },
   { kind: "condition", hint: "True / false" },
@@ -80,6 +83,7 @@ export default function StudioPage() {
   const [workflowTemplate, setWorkflowTemplate] = useState<"blank" | "starter">("blank");
   const [members, setMembers] = useState<Member[]>([]);
   const [integrations, setIntegrations] = useState<Integration[]>([]);
+  const [appConnections, setAppConnections] = useState<AppConnection[]>([]);
   const [triggers, setTriggers] = useState<Trigger[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [newProvider, setNewProvider] = useState<"github" | "slack">("github");
@@ -91,6 +95,8 @@ export default function StudioPage() {
   const [webhookSecret, setWebhookSecret] = useState("");
   const [repository, setRepository] = useState("");
   const [triggerIntegration, setTriggerIntegration] = useState("");
+  const [appTriggerConnection, setAppTriggerConnection] = useState("");
+  const [appTriggerType, setAppTriggerType] = useState("");
   const [scheduleCron, setScheduleCron] = useState("0 9 * * 1-5");
   const [scheduleTimezone, setScheduleTimezone] = useState("UTC");
   const [memberEmail, setMemberEmail] = useState("");
@@ -110,6 +116,8 @@ export default function StudioPage() {
   const role: Role | null = workspace?.role || null;
   const canEdit = (role === "owner" || role === "editor") && selected?.status !== "archived";
   const selectedNode = graph?.nodes.find((node) => node.id === selectedNodeId) || null;
+  const selectedAppConnection = appConnections.find((item) => item.id === selectedNode?.config.connection_id);
+  const selectedCallbackSchema = selectedAppConnection?.outbound_schemas[String(selectedNode?.config.event_type || "")];
   const base = selected && workspaceId ? pathFor(workspaceId, selected.id) : null;
 
   const announce = useCallback((text: string, kind: Notice["kind"] = "info") => setNotice({ text, kind }), []);
@@ -170,6 +178,12 @@ export default function StudioPage() {
   useEffect(() => {
     if (!workspaceId || authState !== "signed_in") { setIntegrations([]); return; }
     void api<Integration[]>(`/api/v1/workspaces/${workspaceId}/integrations`).then(setIntegrations)
+      .catch((error) => announce(errorText(error), "error"));
+  }, [workspaceId, authState, announce]);
+
+  useEffect(() => {
+    if (!workspaceId || authState !== "signed_in") { setAppConnections([]); return; }
+    void api<AppConnection[]>(`/api/v1/workspaces/${workspaceId}/app-connections`).then(setAppConnections)
       .catch((error) => announce(errorText(error), "error"));
   }, [workspaceId, authState, announce]);
 
@@ -452,6 +466,13 @@ export default function StudioPage() {
       body: JSON.stringify({ cron: scheduleCron.trim(), timezone: scheduleTimezone.trim() }) }, me.csrf_token);
     setTriggers((items) => [...items, trigger]); announce("Schedule queued for registration.", "success");
   });
+  const bindAppTrigger = () => void runAction(async () => {
+    if (!base || !me || !appTriggerConnection || !appTriggerType) return;
+    await api(`${base}/triggers/app`, { method: "POST",
+      body: JSON.stringify({ connection_id: appTriggerConnection, event_type: appTriggerType }) }, me.csrf_token);
+    const bindings = await api<Trigger[]>(`${base}/triggers`);
+    setTriggers(bindings); announce("Custom app event is bound to this version.", "success");
+  });
   const disableTrigger = (id: string) => void runAction(async () => {
     if (!base || !me) return;
     const disabled = await api<Trigger>(`${base}/triggers/${id}/disable`,
@@ -572,9 +593,30 @@ export default function StudioPage() {
                 </select>
                 {selectedNode.type === "action.github_comment" ? <><label htmlFor="github-comment-body">Comment</label><textarea id="github-comment-body" value={String(selectedNode.config.body || "")} onChange={(event) => updateNode({ ...selectedNode, config: { ...selectedNode.config, body: event.target.value } })} disabled={!canEdit} rows={4} maxLength={4000} /><p>Posts to the issue that started this run. An uncertain provider result stops for review.</p></> : <><label htmlFor="slack-channel">Channel</label><input id="slack-channel" value={String(selectedNode.config.channel || "")} onChange={(event) => updateNode({ ...selectedNode, config: { ...selectedNode.config, channel: event.target.value } })} disabled={!canEdit} /><label htmlFor="slack-text">Message</label><textarea id="slack-text" value={String(selectedNode.config.text || "")} onChange={(event) => updateNode({ ...selectedNode, config: { ...selectedNode.config, text: event.target.value } })} disabled={!canEdit} rows={4} maxLength={4000} /></>}
               </>}
+              {selectedNode.type === "action.app_callback" && <>
+                <label htmlFor="app-action-connection">Custom app</label>
+                <select id="app-action-connection" value={String(selectedNode.config.connection_id || "")} disabled={!canEdit}
+                  onChange={(event) => { const item = appConnections.find((candidate) => candidate.id === event.target.value); const eventType = Object.keys(item?.outbound_schemas || {})[0] || "app.event.v1"; const properties = item?.outbound_schemas[eventType]?.properties || {}; updateNode({ ...selectedNode, config: { connection_id: event.target.value, contract_version: item?.contract_version || 1, event_type: eventType, data_paths: Object.fromEntries(Object.keys(properties).map((field) => [field, `trigger.payload.${field}`])) } }); }}>
+                  <option value="00000000-0000-0000-0000-000000000000">Choose a connection</option>
+                  {appConnections.filter((item) => !item.revoked_at && item.callback_url && Object.keys(item.outbound_schemas).length).map((item) => <option key={item.id} value={item.id}>{item.display_name}</option>)}
+                </select>
+                <label htmlFor="app-action-type">Callback event type</label>
+                <select id="app-action-type" value={String(selectedNode.config.event_type || "")} disabled={!canEdit || !selectedAppConnection}
+                  onChange={(event) => { const properties = selectedAppConnection?.outbound_schemas[event.target.value]?.properties || {}; updateNode({ ...selectedNode, config: { ...selectedNode.config, event_type: event.target.value, data_paths: Object.fromEntries(Object.keys(properties).map((field) => [field, `trigger.payload.${field}`])) } }); }}>
+                  {Object.keys(selectedAppConnection?.outbound_schemas || {}).map((eventType) => <option key={eventType} value={eventType}>{eventType}</option>)}
+                </select>
+                {Object.entries(selectedCallbackSchema?.properties || {}).map(([field, fieldSchema]) => <div key={field}>
+                  <label htmlFor={`app-path-${field}`}>{field} ({fieldSchema.type}) source path</label>
+                  <input id={`app-path-${field}`} value={String((selectedNode.config.data_paths as Record<string, string> | undefined)?.[field] || "")}
+                    onChange={(event) => updateNode({ ...selectedNode, config: { ...selectedNode.config, data_paths: { ...(selectedNode.config.data_paths as object), [field]: event.target.value } } })}
+                    disabled={!canEdit} placeholder={`trigger.payload.${field}`} />
+                </div>)}
+                <p>Automiq signs and delivers this event to the app’s configured callback URL. The app should deduplicate event IDs.</p>
+              </>}
               {selectedNode.type === "condition" && <><label htmlFor="condition-path">Value path</label><input id="condition-path" value={String((selectedNode.config.expression as Record<string, unknown>)?.path || "")} onChange={(event) => updateNode({ ...selectedNode, config: { expression: { ...(selectedNode.config.expression as object), path: event.target.value } } })} disabled={!canEdit} /><label htmlFor="condition-operator">Operator</label><select id="condition-operator" value={String((selectedNode.config.expression as Record<string, unknown>)?.operator || "eq")} onChange={(event) => updateNode({ ...selectedNode, config: { expression: { ...(selectedNode.config.expression as object), operator: event.target.value } } })} disabled={!canEdit}><option value="eq">Equals</option><option value="ne">Does not equal</option><option value="exists">Exists</option></select><label htmlFor="condition-value">Compare with</label><input id="condition-value" value={String((selectedNode.config.expression as Record<string, unknown>)?.value ?? "")} onChange={(event) => updateNode({ ...selectedNode, config: { expression: { ...(selectedNode.config.expression as object), value: event.target.value === "true" ? true : event.target.value === "false" ? false : event.target.value } } })} disabled={!canEdit} /><p>Use a path such as <code>trigger.payload.flag</code> or <code>steps.action_1.output.ok</code>.</p></>}
               {selectedNode.type === "trigger.github_issue" && <p>Signed GitHub issue events start this workflow. Create the webhook binding below after publishing.</p>}
               {selectedNode.type === "trigger.schedule" && <p>Temporal starts this workflow on a configured schedule. Add the cron binding below after publishing.</p>}
+              {selectedNode.type === "trigger.app_event" && <p>A signed custom app event starts this workflow. Bind an app and event type after publishing.</p>}
               {(selectedNode.type === "trigger.manual" || selectedNode.type === "end") && <p>{selectedNode.type === "end" ? "An end node completes this path. It cannot have outgoing connections." : "The manual trigger receives a JSON payload when you run the workflow."}</p>}
               {run?.steps.filter((step) => step.node_id === selectedNode.id).map((step) => <div className="inspector-attempt" key={step.attempt}><strong>Attempt {step.attempt} · {step.status}</strong>{step.output && <pre>{JSON.stringify(step.output, null, 2)}</pre>}{step.error && <p>{step.error}</p>}</div>)}
               {canEdit && !selectedNode.type.startsWith("trigger.") && <button type="button" className="danger-link" onClick={() => { changeGraph({ ...graph, nodes: graph.nodes.filter((node) => node.id !== selectedNode.id), edges: graph.edges.filter((edge) => edge.source !== selectedNode.id && edge.target !== selectedNode.id) }); setSelectedNodeId(null); }}>Remove node</button>}
@@ -584,6 +626,7 @@ export default function StudioPage() {
           <section className="integration-section" aria-labelledby="integration-title">
             <div className="run-section-header"><div><p className="studio-kicker">CONNECTIONS</p><h2 id="integration-title">Integrations & triggers</h2></div></div>
             <div className="integration-grid">
+              {workspaceId && me && <AppConnectionsPanel workspaceId={workspaceId} role={role} csrf={me.csrf_token} connections={appConnections} onChange={setAppConnections} />}
               <div className="integration-card"><h3>Workspace integrations</h3><p>Credentials are encrypted and never shown again after saving.</p>
                 {integrations.length ? <ul className="connection-items">{integrations.map((item) => <li key={item.id}><div><strong>{item.display_name}</strong><small>{item.provider} · Credential {item.credential_version} · {item.revoked_at ? "Revoked" : "Active"}</small></div>{!item.revoked_at && item.can_configure && <div className="connection-actions"><button type="button" onClick={() => { setEditIntegrationId(item.id); setNewProvider(item.provider); setIntegrationName(item.display_name); setIntegrationToken(""); setWebhookSecret(""); setRepository(""); }}>Rotate</button>{role === "owner" && <><button type="button" onClick={() => { setAssignmentTarget(item.id); setAssignmentEditor(""); }} disabled={busy}>Assign</button><button type="button" onClick={() => revokeIntegration(item.id)} disabled={busy}>Revoke</button></>}</div>}</li>)}</ul> : <p className="connection-empty">No integrations connected.</p>}
                 {role === "owner" && assignmentTarget && <form className="connection-form" onSubmit={(event) => { event.preventDefault(); assignIntegration(); }}><strong>Assign an editor</strong><label htmlFor="assignment-editor">Editor</label><select id="assignment-editor" value={assignmentEditor} onChange={(event) => setAssignmentEditor(event.target.value)} required><option value="">Choose editor</option>{members.filter((item) => item.role === "editor").map((item) => <option key={item.user_id} value={item.user_id}>{item.email}</option>)}</select><div className="connection-actions"><button type="submit" className="studio-primary" disabled={busy || !assignmentEditor}>Assign editor</button><button type="button" onClick={() => setAssignmentTarget("")}>Cancel</button></div></form>}
@@ -597,9 +640,14 @@ export default function StudioPage() {
                 </form>}
               </div>
               <div className="integration-card"><h3>Published triggers</h3><p>Each binding stays pinned to the version shown when it was created.</p>
-                {triggers.length ? <ul className="connection-items">{triggers.map((item) => <li key={item.id}><div><strong>{item.type === "github.issue" ? "GitHub issues" : "Schedule"}</strong><small>{item.enabled ? "Active" : "Disabled"} · Version {versions.find((version) => version.id === item.version_id)?.version || item.version_id.slice(0, 8)}</small>{item.webhook_url && <code className="webhook-path">{item.webhook_url}</code>}{item.type === "schedule" && <small>{item.config.cron} · {item.config.timezone}</small>}</div>{canEdit && item.enabled && <button type="button" onClick={() => disableTrigger(item.id)} disabled={busy}>Disable</button>}</li>)}</ul> : <p className="connection-empty">Publish a GitHub or schedule workflow, then bind its trigger here.</p>}
+                {triggers.length ? <ul className="connection-items">{triggers.map((item) => <li key={item.id}><div><strong>{item.type === "github.issue" ? "GitHub issues" : item.type === "app.event" ? "Custom app event" : "Schedule"}</strong><small>{item.enabled ? "Active" : "Disabled"} · Version {versions.find((version) => version.id === item.version_id)?.version || item.version_id.slice(0, 8)}</small>{item.webhook_url && <code className="webhook-path">{item.webhook_url}</code>}{item.type === "schedule" && <small>{item.config.cron} · {item.config.timezone}</small>}{item.type === "app.event" && <small>{item.config.event_type}</small>}</div>{canEdit && item.enabled && <button type="button" onClick={() => disableTrigger(item.id)} disabled={busy}>Disable</button>}</li>)}</ul> : <p className="connection-empty">Publish a webhook or schedule workflow, then bind its trigger here.</p>}
                 {canEdit && selected.published_version_id && publishedTriggerKind === "trigger.github_issue" && <form className="connection-form" onSubmit={(event) => { event.preventDefault(); bindGithubTrigger(); }}><label htmlFor="trigger-integration">GitHub integration</label><select id="trigger-integration" value={triggerIntegration} onChange={(event) => setTriggerIntegration(event.target.value)} required><option value="">Choose integration</option>{integrations.filter((item) => item.provider === "github" && !item.revoked_at).map((item) => <option key={item.id} value={item.id}>{item.display_name}</option>)}</select><button className="studio-primary" type="submit" disabled={busy || !triggerIntegration}>Create webhook</button></form>}
                 {canEdit && selected.published_version_id && publishedTriggerKind === "trigger.schedule" && <form className="connection-form" onSubmit={(event) => { event.preventDefault(); bindSchedule(); }}><label htmlFor="schedule-cron">Five-field cron</label><input id="schedule-cron" value={scheduleCron} onChange={(event) => setScheduleCron(event.target.value)} required placeholder="0 9 * * 1-5" /><label htmlFor="schedule-timezone">IANA timezone</label><input id="schedule-timezone" value={scheduleTimezone} onChange={(event) => setScheduleTimezone(event.target.value)} required placeholder="UTC" /><button className="studio-primary" type="submit" disabled={busy}>Create schedule</button></form>}
+                {canEdit && selected.published_version_id && publishedTriggerKind === "trigger.app_event" && <form className="connection-form" onSubmit={(event) => { event.preventDefault(); bindAppTrigger(); }}>
+                  <label htmlFor="app-trigger-connection">Custom app</label><select id="app-trigger-connection" value={appTriggerConnection} onChange={(event) => { setAppTriggerConnection(event.target.value); setAppTriggerType(""); }} required><option value="">Choose an app</option>{appConnections.filter((item) => !item.revoked_at && Object.keys(item.inbound_schemas).length).map((item) => <option key={item.id} value={item.id}>{item.display_name}</option>)}</select>
+                  <label htmlFor="app-trigger-type">Event type</label><select id="app-trigger-type" value={appTriggerType} onChange={(event) => setAppTriggerType(event.target.value)} required><option value="">Choose an event</option>{Object.keys(appConnections.find((item) => item.id === appTriggerConnection)?.inbound_schemas || {}).map((eventType) => <option key={eventType} value={eventType}>{eventType}</option>)}</select>
+                  <button className="studio-primary" type="submit" disabled={busy || !appTriggerConnection || !appTriggerType}>Bind app event</button>
+                </form>}
               </div>
             </div>
           </section>
