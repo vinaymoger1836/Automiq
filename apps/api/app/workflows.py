@@ -410,7 +410,7 @@ async def publish(
                 diagnostics.append(
                     Diagnostic(
                         code="invalid_app_connection",
-                        message="Callback needs an active same-workspace connection and complete field mapping",
+                        message="Callback needs an active connection and complete field mapping",
                         node_id=node.id,
                     )
                 )

@@ -40,7 +40,8 @@ def allowed_address(
         return True
     return bool(
         settings.app_env == "test"
-        and host in {settings.http_connector_test_private_host, settings.app_callback_test_private_host}
+        and host
+        in {settings.http_connector_test_private_host, settings.app_callback_test_private_host}
         and isinstance(address, ipaddress.IPv4Address)
         and any(address in network for network in TEST_PRIVATE_RANGES)
     )
