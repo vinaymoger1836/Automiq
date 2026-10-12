@@ -45,6 +45,8 @@ class Settings(BaseSettings):
     http_connector_origin: str = ""
     http_connector_test_private_host: str = ""
     http_connector_test_ca_file: str = ""
+    app_callback_test_private_host: str = ""
+    app_callback_test_ca_file: str = ""
 
     @model_validator(mode="after")
     def production_auth_config(self) -> "Settings":
@@ -116,6 +118,10 @@ class Settings(BaseSettings):
             not self.http_connector_enabled or self.http_connector_test_private_host != host
         ):
             raise ValueError("HTTP connector test host must equal the configured origin")
+        if (
+            self.app_callback_test_private_host or self.app_callback_test_ca_file
+        ) and self.app_env != "test":
+            raise ValueError("App callback test overrides require APP_ENV=test")
         return self
 
 
