@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     metrics_token: SecretStr = SecretStr("")
     manual_runs_per_minute: int = Field(default=60, ge=1, le=10000)
     github_webhooks_per_minute: int = Field(default=120, ge=1, le=10000)
+    app_events_per_minute: int = Field(default=120, ge=1, le=10000)
     workspace_active_run_limit: int = Field(default=25, ge=1, le=10000)
     run_detail_retention_days: int = Field(default=30, ge=1)
     run_summary_retention_days: int = Field(default=90, ge=2)
