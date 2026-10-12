@@ -1,6 +1,6 @@
 # ADR-006: Custom application integration contract
 
-Status: Accepted for implementation by the user's 2026-10-12 request. The generic event/callback slice is implemented; full-stack verification and the GitHub PR correlation slice are pending.
+Status: Accepted for implementation by the user's 2026-10-12 request. The generic event/callback slice is implemented and verified; the GitHub PR correlation slice is pending. For current setup steps, see the [custom app connection guide](../connect-custom-app.md).
 
 ## Context
 

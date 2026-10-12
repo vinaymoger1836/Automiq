@@ -63,7 +63,11 @@ The [Phase 6 guide](docs/phase6.md) covers metrics and traces, run admission lim
 
 ### Custom app connections
 
-Workspace owners can register custom apps with signed CloudEvents 1.0 event types and an optional HTTPS callback endpoint. Published workflows use a custom app event trigger and a signed callback action. Adding a standards-compliant app uses connection and workflow configuration; it does not require an app-specific Automiq connector. The current data contract supports bounded, flat JSON object fields. See the [Phase 7 guide](docs/phase7.md) for the wire format, local two-app E2E setup, and current verification status. PR merge tracking and durable event correlation are the next implementation slice.
+Workspace owners can register custom apps with signed CloudEvents 1.0 event types and an optional HTTPS callback endpoint. Published workflows use a custom app event trigger and a signed callback action. Adding a standards-compliant app uses connection and workflow configuration; it does not require an app-specific Automiq connector. Start with the [custom app connection guide](docs/connect-custom-app.md) for setup and sample signing code. The [Phase 7 notes](docs/phase7.md) cover the local E2E setup and verification. PR merge tracking and durable event correlation are the next implementation slice.
+
+### Zoho Projects
+
+Workspace owners can add a Zoho Projects integration and use a workflow action to update a task status in one configured project. The connector supports US, EU, and India data centers and refreshes OAuth access tokens in the worker. Zoho task webhooks can enter through an app-side bridge and the standard signed custom-app connection. See the [Zoho Projects setup and E2E guide](docs/zoho-projects.md). The PR-merge wait needed to close a task after a later merge is still pending.
 
 ## Current boundaries
 

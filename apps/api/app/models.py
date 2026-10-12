@@ -327,7 +327,7 @@ class Integration(Base):
     __tablename__ = "integrations"
     __table_args__ = (
         UniqueConstraint("id", "workspace_id", name="uq_integrations_id_workspace"),
-        CheckConstraint("provider IN ('github','slack')", name="provider_valid"),
+        CheckConstraint("provider IN ('github','slack','zoho_projects')", name="provider_valid"),
         CheckConstraint("key_version > 0", name="key_version_positive"),
         CheckConstraint("credential_version > 0", name="credential_version_positive"),
         Index("ix_integrations_workspace_provider", "workspace_id", "provider"),

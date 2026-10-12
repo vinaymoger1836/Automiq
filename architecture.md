@@ -253,7 +253,7 @@ Example successful run creation: HTTP `202` with `{"run_id":"...","status":"queu
 
 ## 9. Integration architecture
 
-Every connector exposes typed operations (e.g. `github.search_issues`, `github.add_comment`, `slack.post_message`, `http.request`) with:
+Every connector exposes typed operations (e.g. `github.search_issues`, `github.add_comment`, `slack.post_message`, `zoho_projects.update_task_status`, `http.request`) with:
 
 - JSON input/output schemas.
 - Explicit read/write capabilities, approved domains, timeout, bounded response size.
@@ -270,6 +270,8 @@ Every connector exposes typed operations (e.g. `github.search_issues`, `github.a
 The accepted [custom app connection contract](docs/adr/006-custom-app-integrations.md) lets a workspace owner register an app through the UI/API without an Automiq code change or deployment for that app. Connected apps send signed CloudEvents 1.0 JSON to a fixed per-connection endpoint. A connection stores versioned event schemas and an optional fixed HTTPS callback endpoint; workflow authors bind registered event types to published versions and send schema-checked callback events through a generic action node. Each connection has encrypted, separately rotated inbound and outbound signing secrets. The API persists intake and run starts atomically; Temporal activities deliver callbacks with stable event IDs and visible delivery status. Callbacks are at least once, so receiving apps must deduplicate event IDs.
 
 The first implementation slice supports runtime connection creation, signed inbound events, generic outbound callbacks, and graph configuration. Generic wait-for-event correlation and the GitHub PR status/merge adapter remain the next slice needed for automatic task closure after a later PR merge. See [Phase 7 notes](docs/phase7.md) for current verification and limits.
+
+Zoho Projects is a named connector action for task status updates. Its credential is scoped to one portal and project; the worker refreshes OAuth access tokens and calls a fixed V3 API host for the selected data center. Zoho task events require an app-side bridge that validates the Zoho webhook and emits signed CloudEvents through the generic custom-app connection. See the [Zoho Projects guide](docs/zoho-projects.md).
 
 ## 10. AI agent security and behavior
 

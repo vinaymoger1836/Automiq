@@ -12,11 +12,11 @@ import type { Graph, GraphEdge, GraphNode, NodeKind, Run } from "@/lib/studio-ap
 const labels: Record<NodeKind, string> = {
   "trigger.manual": "Manual trigger", "trigger.github_issue": "GitHub issue", "trigger.schedule": "Schedule", "trigger.app_event": "Custom app event",
   "action.http": "HTTP action", "action.github_comment": "GitHub comment",
-  "action.slack_message": "Slack message", "action.app_callback": "App callback", agent: "AI agent", approval: "Approval", condition: "Condition", end: "End",
+  "action.slack_message": "Slack message", "action.zoho_task_status": "Zoho task status", "action.app_callback": "App callback", agent: "AI agent", approval: "Approval", condition: "Condition", end: "End",
 };
 const initials: Record<NodeKind, string> = {
   "trigger.manual": "TR", "trigger.github_issue": "GH", "trigger.schedule": "SC", "trigger.app_event": "AP",
-  "action.http": "HT", "action.github_comment": "GH", "action.slack_message": "SL", "action.app_callback": "AP",
+  "action.http": "HT", "action.github_comment": "GH", "action.slack_message": "SL", "action.zoho_task_status": "ZP", "action.app_callback": "AP",
   agent: "AI", approval: "OK", condition: "IF", end: "EN",
 };
 
@@ -47,6 +47,7 @@ function newNode(kind: NodeKind, graph: Graph, position: { x: number; y: number 
     kind === "action.http" ? { operation: "mock", mock_output: { ok: true } } :
     kind === "action.github_comment" ? { integration_id: "00000000-0000-0000-0000-000000000000", body: "Thanks for reporting this issue." } :
     kind === "action.slack_message" ? { integration_id: "00000000-0000-0000-0000-000000000000", channel: "#alerts", text: "New issue received." } :
+    kind === "action.zoho_task_status" ? { integration_id: "00000000-0000-0000-0000-000000000000", status_id: "" } :
     kind === "action.app_callback" ? { connection_id: "00000000-0000-0000-0000-000000000000", contract_version: 1, event_type: "app.event.v1", data_paths: {} } : {};
   if (kind === "agent") return { id: `${stem}_${index}`, type: kind, config: {
     model_profile: "fake", instructions: "Classify the issue severity as critical or normal.",

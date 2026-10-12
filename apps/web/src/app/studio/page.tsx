@@ -12,7 +12,7 @@ type RunSummary = { run_id: string; version_id: string; status: string; created_
 type TimelineEvent = { id: number; type: string; payload: Record<string, unknown> };
 type Notice = { kind: "success" | "error" | "info"; text: string };
 type Member = { user_id: string; email: string; role: Role };
-type Integration = { id: string; provider: "github" | "slack"; display_name: string; key_version: number; credential_version: number; revoked_at: string | null; can_configure: boolean };
+type Integration = { id: string; provider: "github" | "slack" | "zoho_projects"; display_name: string; key_version: number; credential_version: number; revoked_at: string | null; can_configure: boolean };
 type Trigger = { id: string; type: "github.issue" | "schedule" | "app.event"; version_id: string; integration_id: string | null; enabled: boolean; webhook_path: string | null; webhook_url: string | null; config: Record<string, string | number> };
 type Approval = { id: string; run_id: string; node_id: string; title: string; status: string; created_at: string; expires_at: string; decided_at: string | null; can_approve: boolean };
 
@@ -24,6 +24,7 @@ const palette: { kind: NodeKind; hint: string }[] = [
   { kind: "action.http", hint: "Mock action" },
   { kind: "action.github_comment", hint: "Reply to issue" },
   { kind: "action.slack_message", hint: "Notify a channel" },
+  { kind: "action.zoho_task_status", hint: "Update project task" },
   { kind: "action.app_callback", hint: "Notify custom app" },
   { kind: "agent", hint: "Bounded classification" },
   { kind: "approval", hint: "Human checkpoint" },
@@ -86,7 +87,7 @@ export default function StudioPage() {
   const [appConnections, setAppConnections] = useState<AppConnection[]>([]);
   const [triggers, setTriggers] = useState<Trigger[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
-  const [newProvider, setNewProvider] = useState<"github" | "slack">("github");
+  const [newProvider, setNewProvider] = useState<Integration["provider"]>("github");
   const [editIntegrationId, setEditIntegrationId] = useState("");
   const [assignmentTarget, setAssignmentTarget] = useState("");
   const [assignmentEditor, setAssignmentEditor] = useState("");
@@ -94,6 +95,12 @@ export default function StudioPage() {
   const [integrationToken, setIntegrationToken] = useState("");
   const [webhookSecret, setWebhookSecret] = useState("");
   const [repository, setRepository] = useState("");
+  const [zohoRegion, setZohoRegion] = useState<"com" | "eu" | "in">("com");
+  const [zohoPortalId, setZohoPortalId] = useState("");
+  const [zohoProjectId, setZohoProjectId] = useState("");
+  const [zohoClientId, setZohoClientId] = useState("");
+  const [zohoClientSecret, setZohoClientSecret] = useState("");
+  const [zohoRefreshToken, setZohoRefreshToken] = useState("");
   const [triggerIntegration, setTriggerIntegration] = useState("");
   const [appTriggerConnection, setAppTriggerConnection] = useState("");
   const [appTriggerType, setAppTriggerType] = useState("");
@@ -431,13 +438,17 @@ export default function StudioPage() {
   });
   const saveIntegration = () => void runAction(async () => {
     if (!workspaceId || !me) return;
-    const body = { provider: newProvider, display_name: integrationName.trim(), token: integrationToken,
-      ...(newProvider === "github" ? { webhook_secret: webhookSecret, repository: repository.trim() } : {}) };
+    const body = { provider: newProvider, display_name: integrationName.trim(),
+      ...(newProvider === "zoho_projects" ? {
+        zoho_region: zohoRegion, zoho_portal_id: zohoPortalId.trim(), zoho_project_id: zohoProjectId.trim(),
+        zoho_client_id: zohoClientId, zoho_client_secret: zohoClientSecret, zoho_refresh_token: zohoRefreshToken,
+      } : { token: integrationToken, ...(newProvider === "github" ? { webhook_secret: webhookSecret, repository: repository.trim() } : {}) }) };
     const path = `/api/v1/workspaces/${workspaceId}/integrations`;
     const saved = await api<Integration>(editIntegrationId ? `${path}/${editIntegrationId}` : path,
       { method: editIntegrationId ? "PUT" : "POST", body: JSON.stringify(body) }, me.csrf_token);
     setIntegrations((items) => [saved, ...items.filter((item) => item.id !== saved.id)]);
     setIntegrationToken(""); setWebhookSecret(""); setIntegrationName(""); setRepository(""); setEditIntegrationId("");
+    setZohoPortalId(""); setZohoProjectId(""); setZohoClientId(""); setZohoClientSecret(""); setZohoRefreshToken("");
     announce(editIntegrationId ? "Credential rotated." : "Integration saved.", "success");
   });
   const revokeIntegration = (id: string) => void runAction(async () => {
@@ -585,13 +596,13 @@ export default function StudioPage() {
                   <label htmlFor="mock-output">Mock response JSON</label><textarea id="mock-output" value={configText} onChange={(event) => setConfigText(event.target.value)} onBlur={() => { try { const output = parsePayload(configText); updateNode({ ...selectedNode, config: { ...selectedNode.config, mock_output: output } }); } catch (error) { announce(errorText(error), "error"); } }} disabled={!canEdit} rows={6} /><p>Returned by the local mock adapter without an outbound call.</p>
                 </>}
               </>}
-              {(selectedNode.type === "action.github_comment" || selectedNode.type === "action.slack_message") && <>
+              {(selectedNode.type === "action.github_comment" || selectedNode.type === "action.slack_message" || selectedNode.type === "action.zoho_task_status") && <>
                 <label htmlFor="action-integration">Integration</label>
                 <select id="action-integration" value={String(selectedNode.config.integration_id || "")} onChange={(event) => updateNode({ ...selectedNode, config: { ...selectedNode.config, integration_id: event.target.value } })} disabled={!canEdit}>
                   <option value="00000000-0000-0000-0000-000000000000">Choose an integration</option>
-                  {integrations.filter((item) => item.provider === (selectedNode.type === "action.github_comment" ? "github" : "slack") && !item.revoked_at).map((item) => <option key={item.id} value={item.id}>{item.display_name}</option>)}
+                  {integrations.filter((item) => item.provider === (selectedNode.type === "action.github_comment" ? "github" : selectedNode.type === "action.slack_message" ? "slack" : "zoho_projects") && !item.revoked_at).map((item) => <option key={item.id} value={item.id}>{item.display_name}</option>)}
                 </select>
-                {selectedNode.type === "action.github_comment" ? <><label htmlFor="github-comment-body">Comment</label><textarea id="github-comment-body" value={String(selectedNode.config.body || "")} onChange={(event) => updateNode({ ...selectedNode, config: { ...selectedNode.config, body: event.target.value } })} disabled={!canEdit} rows={4} maxLength={4000} /><p>Posts to the issue that started this run. An uncertain provider result stops for review.</p></> : <><label htmlFor="slack-channel">Channel</label><input id="slack-channel" value={String(selectedNode.config.channel || "")} onChange={(event) => updateNode({ ...selectedNode, config: { ...selectedNode.config, channel: event.target.value } })} disabled={!canEdit} /><label htmlFor="slack-text">Message</label><textarea id="slack-text" value={String(selectedNode.config.text || "")} onChange={(event) => updateNode({ ...selectedNode, config: { ...selectedNode.config, text: event.target.value } })} disabled={!canEdit} rows={4} maxLength={4000} /></>}
+                {selectedNode.type === "action.github_comment" ? <><label htmlFor="github-comment-body">Comment</label><textarea id="github-comment-body" value={String(selectedNode.config.body || "")} onChange={(event) => updateNode({ ...selectedNode, config: { ...selectedNode.config, body: event.target.value } })} disabled={!canEdit} rows={4} maxLength={4000} /><p>Posts to the issue that started this run. An uncertain provider result stops for review.</p></> : selectedNode.type === "action.slack_message" ? <><label htmlFor="slack-channel">Channel</label><input id="slack-channel" value={String(selectedNode.config.channel || "")} onChange={(event) => updateNode({ ...selectedNode, config: { ...selectedNode.config, channel: event.target.value } })} disabled={!canEdit} /><label htmlFor="slack-text">Message</label><textarea id="slack-text" value={String(selectedNode.config.text || "")} onChange={(event) => updateNode({ ...selectedNode, config: { ...selectedNode.config, text: event.target.value } })} disabled={!canEdit} rows={4} maxLength={4000} /></> : <><label htmlFor="zoho-status-id">Target task status ID</label><input id="zoho-status-id" value={String(selectedNode.config.status_id || "")} onChange={(event) => updateNode({ ...selectedNode, config: { ...selectedNode.config, status_id: event.target.value } })} disabled={!canEdit} required inputMode="numeric" pattern="[0-9]+" placeholder="Status ID from Zoho Projects" /><p>Updates the task in this integration’s project. The trigger payload must contain a numeric <code>task_id</code>. Configure an approval before this action if an AI agent influences it.</p></>}
               </>}
               {selectedNode.type === "action.app_callback" && <>
                 <label htmlFor="app-action-connection">Custom app</label>
@@ -628,15 +639,23 @@ export default function StudioPage() {
             <div className="integration-grid">
               {workspaceId && me && <AppConnectionsPanel workspaceId={workspaceId} role={role} csrf={me.csrf_token} connections={appConnections} onChange={setAppConnections} />}
               <div className="integration-card"><h3>Workspace integrations</h3><p>Credentials are encrypted and never shown again after saving.</p>
-                {integrations.length ? <ul className="connection-items">{integrations.map((item) => <li key={item.id}><div><strong>{item.display_name}</strong><small>{item.provider} · Credential {item.credential_version} · {item.revoked_at ? "Revoked" : "Active"}</small></div>{!item.revoked_at && item.can_configure && <div className="connection-actions"><button type="button" onClick={() => { setEditIntegrationId(item.id); setNewProvider(item.provider); setIntegrationName(item.display_name); setIntegrationToken(""); setWebhookSecret(""); setRepository(""); }}>Rotate</button>{role === "owner" && <><button type="button" onClick={() => { setAssignmentTarget(item.id); setAssignmentEditor(""); }} disabled={busy}>Assign</button><button type="button" onClick={() => revokeIntegration(item.id)} disabled={busy}>Revoke</button></>}</div>}</li>)}</ul> : <p className="connection-empty">No integrations connected.</p>}
+                {integrations.length ? <ul className="connection-items">{integrations.map((item) => <li key={item.id}><div><strong>{item.display_name}</strong><small>{item.provider === "zoho_projects" ? "Zoho Projects" : item.provider} · Credential {item.credential_version} · {item.revoked_at ? "Revoked" : "Active"}</small></div>{!item.revoked_at && item.can_configure && <div className="connection-actions"><button type="button" onClick={() => { setEditIntegrationId(item.id); setNewProvider(item.provider); setIntegrationName(item.display_name); setIntegrationToken(""); setWebhookSecret(""); setRepository(""); setZohoPortalId(""); setZohoProjectId(""); setZohoClientId(""); setZohoClientSecret(""); setZohoRefreshToken(""); }}>Rotate</button>{role === "owner" && <><button type="button" onClick={() => { setAssignmentTarget(item.id); setAssignmentEditor(""); }} disabled={busy}>Assign</button><button type="button" onClick={() => revokeIntegration(item.id)} disabled={busy}>Revoke</button></>}</div>}</li>)}</ul> : <p className="connection-empty">No integrations connected.</p>}
                 {role === "owner" && assignmentTarget && <form className="connection-form" onSubmit={(event) => { event.preventDefault(); assignIntegration(); }}><strong>Assign an editor</strong><label htmlFor="assignment-editor">Editor</label><select id="assignment-editor" value={assignmentEditor} onChange={(event) => setAssignmentEditor(event.target.value)} required><option value="">Choose editor</option>{members.filter((item) => item.role === "editor").map((item) => <option key={item.user_id} value={item.user_id}>{item.email}</option>)}</select><div className="connection-actions"><button type="submit" className="studio-primary" disabled={busy || !assignmentEditor}>Assign editor</button><button type="button" onClick={() => setAssignmentTarget("")}>Cancel</button></div></form>}
                 {(role === "owner" || editIntegrationId) && <form className="connection-form" onSubmit={(event) => { event.preventDefault(); saveIntegration(); }}>
                   <strong>{editIntegrationId ? "Rotate credential" : "Add integration"}</strong>
-                  <label htmlFor="integration-provider">Provider</label><select id="integration-provider" value={newProvider} onChange={(event) => setNewProvider(event.target.value as "github" | "slack")} disabled={busy || !!editIntegrationId}><option value="github">GitHub</option><option value="slack">Slack</option></select>
+                  <label htmlFor="integration-provider">Provider</label><select id="integration-provider" value={newProvider} onChange={(event) => setNewProvider(event.target.value as Integration["provider"])} disabled={busy || !!editIntegrationId}><option value="github">GitHub</option><option value="slack">Slack</option><option value="zoho_projects">Zoho Projects</option></select>
                   <label htmlFor="integration-name">Name</label><input id="integration-name" value={integrationName} onChange={(event) => setIntegrationName(event.target.value)} required maxLength={120} placeholder="Team integration" />
                   {newProvider === "github" && <><label htmlFor="integration-repository">Repository</label><input id="integration-repository" value={repository} onChange={(event) => setRepository(event.target.value)} required placeholder="owner/repository" /><label htmlFor="integration-secret">Webhook secret</label><input id="integration-secret" type="password" autoComplete="off" value={webhookSecret} onChange={(event) => setWebhookSecret(event.target.value)} required minLength={16} /></>}
-                  <label htmlFor="integration-token">{newProvider === "github" ? "GitHub token" : "Slack bot token"}</label><input id="integration-token" type="password" autoComplete="off" value={integrationToken} onChange={(event) => setIntegrationToken(event.target.value)} required minLength={8} />
-                  <div className="connection-actions"><button className="studio-primary" type="submit" disabled={busy}>Save integration</button>{editIntegrationId && <button type="button" onClick={() => { setEditIntegrationId(""); setIntegrationName(""); setIntegrationToken(""); setWebhookSecret(""); setRepository(""); }}>Cancel</button>}</div>
+                  {newProvider === "zoho_projects" ? <>
+                    <p>Connect one Zoho Projects portal and project. Credentials need the <code>ZohoProjects.tasks.UPDATE</code> scope. Replacing credentials requires all fields.</p>
+                    <label htmlFor="zoho-region">Zoho data center</label><select id="zoho-region" value={zohoRegion} onChange={(event) => setZohoRegion(event.target.value as "com" | "eu" | "in")}><option value="com">US (.com)</option><option value="eu">EU (.eu)</option><option value="in">India (.in)</option></select>
+                    <label htmlFor="zoho-portal">Portal ID</label><input id="zoho-portal" value={zohoPortalId} onChange={(event) => setZohoPortalId(event.target.value)} required inputMode="numeric" pattern="[0-9]+" />
+                    <label htmlFor="zoho-project">Project ID</label><input id="zoho-project" value={zohoProjectId} onChange={(event) => setZohoProjectId(event.target.value)} required inputMode="numeric" pattern="[0-9]+" />
+                    <label htmlFor="zoho-client-id">OAuth client ID</label><input id="zoho-client-id" type="password" autoComplete="off" value={zohoClientId} onChange={(event) => setZohoClientId(event.target.value)} required minLength={8} />
+                    <label htmlFor="zoho-client-secret">OAuth client secret</label><input id="zoho-client-secret" type="password" autoComplete="off" value={zohoClientSecret} onChange={(event) => setZohoClientSecret(event.target.value)} required minLength={8} />
+                    <label htmlFor="zoho-refresh-token">OAuth refresh token</label><input id="zoho-refresh-token" type="password" autoComplete="off" value={zohoRefreshToken} onChange={(event) => setZohoRefreshToken(event.target.value)} required minLength={8} />
+                  </> : <><label htmlFor="integration-token">{newProvider === "github" ? "GitHub token" : "Slack bot token"}</label><input id="integration-token" type="password" autoComplete="off" value={integrationToken} onChange={(event) => setIntegrationToken(event.target.value)} required minLength={8} /></>}
+                  <div className="connection-actions"><button className="studio-primary" type="submit" disabled={busy}>Save integration</button>{editIntegrationId && <button type="button" onClick={() => { setEditIntegrationId(""); setIntegrationName(""); setIntegrationToken(""); setWebhookSecret(""); setRepository(""); setZohoPortalId(""); setZohoProjectId(""); setZohoClientId(""); setZohoClientSecret(""); setZohoRefreshToken(""); }}>Cancel</button>}</div>
                 </form>}
               </div>
               <div className="integration-card"><h3>Published triggers</h3><p>Each binding stays pinned to the version shown when it was created.</p>

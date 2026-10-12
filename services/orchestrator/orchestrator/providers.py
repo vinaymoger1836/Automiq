@@ -15,7 +15,7 @@ from urllib.parse import quote
 import httpx
 from app.config import get_settings
 from app.db import session_factory
-from app.graph import GithubCommentConfig, SlackMessageConfig
+from app.graph import GithubCommentConfig, SlackMessageConfig, ZohoTaskStatusConfig
 from app.integration_crypto import decrypt_credentials
 from app.models import ActionEffect, AuditLog, Integration, WorkflowRun
 from fastapi import HTTPException
@@ -24,6 +24,11 @@ from sqlalchemy import select
 from orchestrator.http_connector import HttpActionError, pinned_address
 
 MAX_PROVIDER_RESPONSE = 16_384
+ZOHO_HOSTS = {
+    "com": ("accounts.zoho.com", "projectsapi.zoho.com"),
+    "eu": ("accounts.zoho.eu", "projectsapi.zoho.eu"),
+    "in": ("accounts.zoho.in", "projectsapi.zoho.in"),
+}
 
 
 class ProviderError(Exception):
@@ -75,7 +80,10 @@ async def provider_json(
     params: dict[str, str] | None = None,
     mutation: bool = False,
 ) -> dict[str, Any]:
-    if host not in {"api.github.com", "slack.com"} or not path.startswith("/"):
+    allowed_hosts = {"api.github.com", "slack.com"} | {
+        project_host for _, project_host in ZOHO_HOSTS.values()
+    }
+    if host not in allowed_hosts or not path.startswith("/"):
         raise ProviderError("unsafe_destination")
     try:
         address = await pinned_address(host, 443, get_settings())
@@ -140,6 +148,64 @@ async def provider_json(
         ) from None
 
 
+async def zoho_access_token(values: dict[str, str]) -> str:
+    region = values.get("region", "")
+    hosts = ZOHO_HOSTS.get(region)
+    if hosts is None or any(
+        not values.get(key)
+        for key in ("client_id", "client_secret", "refresh_token")
+    ):
+        raise ProviderError("integration_unavailable")
+    host = hosts[0]
+    try:
+        address = await pinned_address(host, 443, get_settings())
+        authority = f"[{address}]" if ":" in address else address
+        async with asyncio.timeout(12):
+            async with httpx.AsyncClient(
+                verify=ssl.create_default_context(),
+                trust_env=False,
+                follow_redirects=False,
+                timeout=httpx.Timeout(10, connect=3),
+            ) as client:
+                async with client.stream(
+                    "POST",
+                    f"https://{authority}:443/oauth/v2/token",
+                    data={
+                        "grant_type": "refresh_token",
+                        "client_id": values["client_id"],
+                        "client_secret": values["client_secret"],
+                        "refresh_token": values["refresh_token"],
+                    },
+                    headers={"Host": host, "Accept": "application/json", "Connection": "close"},
+                    extensions={"sni_hostname": host},
+                ) as response:
+                    if response.status_code == 429 or response.status_code >= 500:
+                        raise ProviderError("zoho_auth_unavailable", retryable=True)
+                    if response.status_code >= 300:
+                        raise ProviderError("zoho_auth_error")
+                    data = bytearray()
+                    async for chunk in response.aiter_raw():
+                        data.extend(chunk)
+                        if len(data) > MAX_PROVIDER_RESPONSE:
+                            raise ProviderError("invalid_provider_response")
+                    try:
+                        parsed = json.loads(data)
+                    except (ValueError, UnicodeDecodeError):
+                        raise ProviderError("invalid_provider_response") from None
+                    if not isinstance(parsed, dict) or not isinstance(
+                        parsed.get("access_token"), str
+                    ):
+                        raise ProviderError("zoho_auth_error")
+                    token: str = parsed["access_token"]
+                    if not token or len(token) > 4096:
+                        raise ProviderError("invalid_provider_response")
+                    return token
+    except HttpActionError as exc:
+        raise ProviderError(exc.code, retryable=exc.retryable) from None
+    except (TimeoutError, httpx.TransportError):
+        raise ProviderError("zoho_auth_unavailable", retryable=True) from None
+
+
 async def github_search_issues(
     run_id: uuid.UUID,
     integration_id: uuid.UUID,
@@ -195,14 +261,18 @@ async def execute_provider_action(command: dict[str, Any]) -> dict[str, Any]:
     run_id = uuid.UUID(command["run_id"])
     node_id = str(command["node_id"])
     kind = str(command["kind"])
-    if kind not in {"action.github_comment", "action.slack_message"}:
+    if kind not in {"action.github_comment", "action.slack_message", "action.zoho_task_status"}:
         raise ProviderError("invalid_action")
-    config = (
-        GithubCommentConfig.model_validate(command["config"])
-        if kind == "action.github_comment"
-        else SlackMessageConfig.model_validate(command["config"])
-    )
-    provider = "github" if kind == "action.github_comment" else "slack"
+    config: GithubCommentConfig | SlackMessageConfig | ZohoTaskStatusConfig
+    if kind == "action.github_comment":
+        config = GithubCommentConfig.model_validate(command["config"])
+        provider = "github"
+    elif kind == "action.slack_message":
+        config = SlackMessageConfig.model_validate(command["config"])
+        provider = "slack"
+    else:
+        config = ZohoTaskStatusConfig.model_validate(command["config"])
+        provider = "zoho_projects"
     effect_key = f"{run_id}:{node_id}"
     async with session_factory()() as db:
         run = await db.get(WorkflowRun, run_id)
@@ -226,6 +296,16 @@ async def execute_provider_action(command: dict[str, Any]) -> dict[str, Any]:
         issue_number = trigger.get("issue_number")
         if not isinstance(issue_number, int) or issue_number < 1:
             raise ProviderError("invalid_issue")
+    if provider == "zoho_projects":
+        assert isinstance(config, ZohoTaskStatusConfig)
+        task_id = trigger.get("task_id")
+        if not isinstance(task_id, (str, int)) or not re.fullmatch(r"[0-9]{1,30}", str(task_id)):
+            raise ProviderError("invalid_task_id")
+        if any(
+            not re.fullmatch(r"[0-9]{1,30}", values.get(key, ""))
+            for key in ("portal_id", "project_id")
+        ):
+            raise ProviderError("integration_unavailable")
 
     async with session_factory()() as db:
         async with db.begin():
@@ -257,6 +337,9 @@ async def execute_provider_action(command: dict[str, Any]) -> dict[str, Any]:
             if get_settings().integration_fake_rate_limit_first and attempts == 1:
                 raise ProviderError("rate_limited", retryable=True, retry_after=1)
             result = {"provider": provider, "fake": True, "delivered": True}
+            if provider == "zoho_projects":
+                assert isinstance(config, ZohoTaskStatusConfig)
+                result.update({"task_id": str(task_id), "status_id": config.status_id})
         elif provider == "github":
             assert isinstance(config, GithubCommentConfig)
             path = f"/repos/{quote(repo, safe='/')}/issues/{issue_number}/comments"
@@ -271,7 +354,7 @@ async def execute_provider_action(command: dict[str, Any]) -> dict[str, Any]:
             if not isinstance(data.get("id"), int):
                 raise ProviderError("invalid_provider_response")
             result = {"provider": "github", "comment_id": data["id"]}
-        else:
+        elif provider == "slack":
             assert isinstance(config, SlackMessageConfig)
             data = await provider_json(
                 "slack.com",
@@ -286,6 +369,28 @@ async def execute_provider_action(command: dict[str, Any]) -> dict[str, Any]:
             if data.get("ok") is not True or not isinstance(data.get("ts"), str):
                 raise ProviderError("provider_rejected")
             result = {"provider": "slack", "message_ts": data["ts"]}
+        else:
+            assert isinstance(config, ZohoTaskStatusConfig)
+            token = await zoho_access_token(values)
+            project_host = ZOHO_HOSTS[values["region"]][1]
+            path = (
+                f"/api/v3/portal/{values['portal_id']}/projects/"
+                f"{values['project_id']}/tasks/{task_id}"
+            )
+            await provider_json(
+                project_host,
+                "PATCH",
+                path,
+                token,
+                body={"status": {"id": config.status_id}},
+                mutation=True,
+            )
+            result = {
+                "provider": "zoho_projects",
+                "task_id": str(task_id),
+                "status_id": config.status_id,
+                "delivered": True,
+            }
     except ProviderError as exc:
         async with session_factory()() as db:
             async with db.begin():

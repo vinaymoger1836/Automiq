@@ -113,6 +113,11 @@ class SlackMessageConfig(StrictModel):
     text: str = Field(min_length=1, max_length=4000)
 
 
+class ZohoTaskStatusConfig(StrictModel):
+    integration_id: uuid.UUID
+    status_id: str = Field(pattern=r"^[0-9]{1,30}$")
+
+
 class AgentSchema(StrictModel):
     # Deliberately small JSON Schema subset so the same contract works for fake and real providers.
     type: Literal["object"] = "object"
@@ -238,6 +243,13 @@ class SlackMessageNode(StrictModel):
     position: Position | None = None
 
 
+class ZohoTaskStatusNode(StrictModel):
+    id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
+    type: Literal["action.zoho_task_status"]
+    config: ZohoTaskStatusConfig
+    position: Position | None = None
+
+
 class AppCallbackNode(StrictModel):
     id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
     type: Literal["action.app_callback"]
@@ -267,6 +279,7 @@ Node = Annotated[
     | HttpNode
     | GithubCommentNode
     | SlackMessageNode
+    | ZohoTaskStatusNode
     | AppCallbackNode
     | AgentNode
     | ApprovalNode
@@ -343,7 +356,12 @@ def validate_graph(graph: Graph) -> list[Diagnostic]:
             add("outgoing_count", "Node needs one unlabeled outgoing edge", node.id)
         if node.type != "condition" and any(edge.source_handle is not None for edge in outs):
             add("invalid_handle", "Only conditions may have branch handles", node.id)
-        if node.type in {"action.github_comment", "action.slack_message", "action.app_callback"}:
+        if node.type in {
+            "action.github_comment",
+            "action.slack_message",
+            "action.zoho_task_status",
+            "action.app_callback",
+        }:
             current = node.id
             has_approval = False
             seen: set[str] = set()

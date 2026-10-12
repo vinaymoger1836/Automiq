@@ -128,7 +128,11 @@ class WorkflowExecution:
                     return "failed"
                 result = action["output"]
                 attempts = action["attempts"]
-            elif kind in {"action.github_comment", "action.slack_message"}:
+            elif kind in {
+                "action.github_comment",
+                "action.slack_message",
+                "action.zoho_task_status",
+            }:
                 try:
                     action = await workflow.execute_activity(
                         "execute_provider_action",

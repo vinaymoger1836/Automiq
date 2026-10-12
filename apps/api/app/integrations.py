@@ -40,20 +40,41 @@ router = APIRouter(prefix="/api/v1", tags=["integrations"])
 
 
 class IntegrationCreate(BaseModel):
-    provider: Literal["github", "slack"]
+    provider: Literal["github", "slack", "zoho_projects"]
     display_name: str = Field(min_length=1, max_length=120)
-    token: SecretStr = Field(min_length=8, max_length=4096)
+    token: SecretStr | None = Field(default=None, min_length=8, max_length=4096)
     webhook_secret: SecretStr | None = Field(default=None, min_length=16, max_length=4096)
     repository: str | None = Field(
         default=None, pattern=r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", max_length=200
     )
+    zoho_region: Literal["com", "eu", "in"] | None = None
+    zoho_portal_id: str | None = Field(default=None, pattern=r"^[0-9]{1,30}$")
+    zoho_project_id: str | None = Field(default=None, pattern=r"^[0-9]{1,30}$")
+    zoho_client_id: SecretStr | None = Field(default=None, min_length=8, max_length=256)
+    zoho_client_secret: SecretStr | None = Field(default=None, min_length=8, max_length=256)
+    zoho_refresh_token: SecretStr | None = Field(default=None, min_length=8, max_length=4096)
 
     @model_validator(mode="after")
     def provider_fields(self) -> "IntegrationCreate":
+        zoho_fields = (
+            self.zoho_region,
+            self.zoho_portal_id,
+            self.zoho_project_id,
+            self.zoho_client_id,
+            self.zoho_client_secret,
+            self.zoho_refresh_token,
+        )
         if self.provider == "github" and (not self.webhook_secret or not self.repository):
             raise ValueError("GitHub needs a webhook secret and repository")
         if self.provider == "slack" and (self.webhook_secret or self.repository):
             raise ValueError("Slack only needs a token")
+        if self.provider == "zoho_projects":
+            if self.token or self.webhook_secret or self.repository or not all(zoho_fields):
+                raise ValueError(
+                    "Zoho Projects needs region, portal, project, client and refresh credentials"
+                )
+        elif not self.token or any(value is not None for value in zoho_fields):
+            raise ValueError("This provider needs a token and no Zoho Projects fields")
         return self
 
 
@@ -191,6 +212,24 @@ def trigger_out(row: Trigger) -> TriggerOut:
 
 
 def credentials(body: IntegrationCreate) -> dict[str, str]:
+    if body.provider == "zoho_projects":
+        assert (
+            body.zoho_region
+            and body.zoho_portal_id
+            and body.zoho_project_id
+            and body.zoho_client_id
+            and body.zoho_client_secret
+            and body.zoho_refresh_token
+        )
+        return {
+            "region": body.zoho_region,
+            "portal_id": body.zoho_portal_id,
+            "project_id": body.zoho_project_id,
+            "client_id": body.zoho_client_id.get_secret_value(),
+            "client_secret": body.zoho_client_secret.get_secret_value(),
+            "refresh_token": body.zoho_refresh_token.get_secret_value(),
+        }
+    assert body.token
     values = {"token": body.token.get_secret_value()}
     if body.provider == "github":
         assert body.webhook_secret and body.repository

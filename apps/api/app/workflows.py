@@ -421,6 +421,9 @@ async def publish(
         elif node.type == "action.slack_message":
             provider = "slack"
             integration_id = node.config.integration_id
+        elif node.type == "action.zoho_task_status":
+            provider = "zoho_projects"
+            integration_id = node.config.integration_id
         elif node.type == "agent" and node.config.allowed_tools:
             provider = "github"
             integration_id = node.config.github_integration_id
