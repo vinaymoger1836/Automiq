@@ -146,6 +146,35 @@ class WorkflowExecution:
                     return "failed"
                 result = action["output"]
                 attempts = action["attempts"]
+            elif kind == "action.app_callback":
+                data = {
+                    key: read_path(path, trigger, outputs)
+                    for key, path in node["config"]["data_paths"].items()
+                }
+                try:
+                    action = await workflow.execute_activity(
+                        "execute_app_callback",
+                        {
+                            "run_id": run_id,
+                            "node_id": current,
+                            "config": node["config"],
+                            "data": data,
+                        },
+                        start_to_close_timeout=timedelta(seconds=20),
+                        retry_policy=ACTION_RETRY,
+                    )
+                except ActivityError:
+                    await project(
+                        run_id,
+                        "step.failed",
+                        f"{current}:terminal-failed",
+                        node_id=current,
+                        error="external_error",
+                    )
+                    await project(run_id, "run.failed", "run:failed", error="external_error")
+                    return "failed"
+                result = action["output"]
+                attempts = action["attempts"]
             elif kind == "agent":
                 try:
                     result = await workflow.execute_activity(
