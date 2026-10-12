@@ -29,7 +29,10 @@ class DataSchema(BaseModel):
     def valid_fields(self) -> "DataSchema":
         if any(not FIELD_NAME.fullmatch(name) for name in self.properties):
             raise ValueError("Schema property names must be simple identifiers")
-        if len(set(self.required)) != len(self.required) or not set(self.required) <= self.properties.keys():
+        if (
+            len(set(self.required)) != len(self.required)
+            or not set(self.required) <= self.properties.keys()
+        ):
             raise ValueError("Required properties must be unique declared properties")
         return self
 

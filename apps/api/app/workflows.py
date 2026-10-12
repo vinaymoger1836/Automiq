@@ -13,7 +13,16 @@ from sqlalchemy.exc import IntegrityError
 from app.auth import Db, UserDep, membership, require_csrf
 from app.config import get_settings
 from app.graph import EMPTY_GRAPH, Diagnostic, Graph, validate_graph
-from app.models import AppConnection, AuditLog, Integration, Membership, User, Workflow, WorkflowVersion, Workspace
+from app.models import (
+    AppConnection,
+    AuditLog,
+    Integration,
+    Membership,
+    User,
+    Workflow,
+    WorkflowVersion,
+    Workspace,
+)
 
 router = APIRouter(prefix="/api/v1", tags=["workflows"])
 

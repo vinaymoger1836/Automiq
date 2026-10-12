@@ -421,12 +421,16 @@ def validate_graph(graph: Graph) -> list[Diagnostic]:
                     continue
                 source = path.split(".", 2)[1]
                 current = node.id
-                ancestors: set[str] = set()
-                while len(incoming[current]) == 1 and current not in ancestors:
+                callback_ancestors: set[str] = set()
+                while len(incoming[current]) == 1 and current not in callback_ancestors:
                     current = incoming[current][0].source
-                    ancestors.add(current)
-                if source not in ancestors:
-                    add("non_upstream_reference", "Callback field must use an upstream step", node.id)
+                    callback_ancestors.add(current)
+                if source not in callback_ancestors:
+                    add(
+                        "non_upstream_reference",
+                        "Callback field must use an upstream step",
+                        node.id,
+                    )
     return errors
 
 

@@ -459,7 +459,9 @@ class AppConnection(Base):
     contract_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
     encrypted_credentials: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     key_version: Mapped[int] = mapped_column(Integer, nullable=False)
-    credential_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    credential_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("1")
+    )
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
@@ -510,7 +512,9 @@ class AppCallbackDelivery(Base):
     )
     node_id: Mapped[str] = mapped_column(String(64), nullable=False)
     event_id: Mapped[str] = mapped_column(String(80), nullable=False)
-    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default=text("'pending'"))
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default=text("'pending'")
+    )
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     last_error: Mapped[str | None] = mapped_column(String(120))
     created_at: Mapped[datetime] = mapped_column(

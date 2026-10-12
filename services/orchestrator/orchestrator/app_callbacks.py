@@ -130,7 +130,10 @@ async def execute_app_callback(command: dict[str, Any]) -> dict[str, Any]:
                 .with_for_update()
             )
             if delivery is not None and delivery.status == "delivered":
-                return {"output": {"delivered": True, "event_id": event_id}, "attempts": delivery.attempts}
+                return {
+                    "output": {"delivered": True, "event_id": event_id},
+                    "attempts": delivery.attempts,
+                }
             if delivery is None:
                 delivery = AppCallbackDelivery(
                     workspace_id=workspace_id,
@@ -163,7 +166,9 @@ async def execute_app_callback(command: dict[str, Any]) -> dict[str, Any]:
             async with db.begin():
                 delivery = await db.scalar(
                     select(AppCallbackDelivery)
-                    .where(AppCallbackDelivery.run_id == run_id, AppCallbackDelivery.node_id == node_id)
+                    .where(
+                        AppCallbackDelivery.run_id == run_id, AppCallbackDelivery.node_id == node_id
+                    )
                     .with_for_update()
                 )
                 if delivery is not None:

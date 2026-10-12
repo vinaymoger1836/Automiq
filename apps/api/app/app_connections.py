@@ -201,7 +201,9 @@ async def list_connections(ws: uuid.UUID, db: Db, user: UserDep) -> list[Connect
     return [connection_out(row) for row in rows]
 
 
-@router.post("/workspaces/{ws}/app-connections/{connection_id}/rotate", response_model=ConnectionCreated)
+@router.post(
+    "/workspaces/{ws}/app-connections/{connection_id}/rotate", response_model=ConnectionCreated
+)
 async def rotate_connection(
     ws: uuid.UUID, connection_id: uuid.UUID, request: Request, db: Db, user: UserDep
 ) -> ConnectionCreated:
@@ -244,7 +246,9 @@ async def rotate_connection(
     )
 
 
-@router.post("/workspaces/{ws}/app-connections/{connection_id}/revoke", response_model=ConnectionOut)
+@router.post(
+    "/workspaces/{ws}/app-connections/{connection_id}/revoke", response_model=ConnectionOut
+)
 async def revoke_connection(
     ws: uuid.UUID, connection_id: uuid.UUID, request: Request, db: Db, user: UserDep
 ) -> ConnectionOut:
@@ -365,7 +369,9 @@ async def receive_event(public_id: str, request: Request, db: Db) -> EventAccept
         schema = DataSchema.model_validate(connection.inbound_schemas[event.type])
         validate_data(event.data, schema)
     except (ValidationError, ValueError, KeyError):
-        raise HTTPException(status_code=422, detail="Event does not match connection contract") from None
+        raise HTTPException(
+            status_code=422, detail="Event does not match connection contract"
+        ) from None
     digest = hashlib.sha256(raw).hexdigest()
     locked = await db.scalar(
         select(AppConnection)
@@ -373,7 +379,11 @@ async def receive_event(public_id: str, request: Request, db: Db) -> EventAccept
         .with_for_update()
         .execution_options(populate_existing=True)
     )
-    if locked is None or locked.revoked_at is not None or locked.credential_version != verified_version:
+    if (
+        locked is None
+        or locked.revoked_at is not None
+        or locked.credential_version != verified_version
+    ):
         raise HTTPException(status_code=409, detail="Connection changed during event intake")
     existing = await db.scalar(
         select(AppEventReceipt).where(
