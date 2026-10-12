@@ -8,7 +8,8 @@ export async function proxyToApi(request: NextRequest, path: string): Promise<Re
   try {
     let body: ArrayBuffer | undefined;
     if (request.method !== "GET" && request.method !== "HEAD") {
-      if (path.startsWith("/api/v1/webhooks/")) {
+      if (path.startsWith("/api/v1/webhooks/") || path.startsWith("/api/v1/app-connections/")) {
+        const limit = path.startsWith("/api/v1/app-connections/") ? 16_000 : 64_000;
         const reader = request.body?.getReader();
         const chunks: Uint8Array[] = [];
         let size = 0;
@@ -17,7 +18,7 @@ export async function proxyToApi(request: NextRequest, path: string): Promise<Re
             const next = await reader.read();
             if (next.done) break;
             size += next.value.byteLength;
-            if (size > 64_000) {
+            if (size > limit) {
               await reader.cancel();
               return Response.json({ error: { code: "payload_too_large", message: "Payload too large" } }, { status: 413 });
             }

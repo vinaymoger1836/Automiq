@@ -142,6 +142,8 @@ async def create_connection(
 ) -> ConnectionCreated:
     require_csrf(request)
     await membership(db, ws, user, "manage")
+    if not body.display_name.strip():
+        raise HTTPException(status_code=422, detail="Connection name is required")
     inbound_secret = secrets.token_urlsafe(32)
     outbound_secret = secrets.token_urlsafe(32)
     connection_id = uuid.uuid4()
@@ -421,6 +423,7 @@ async def receive_event(public_id: str, request: Request, db: Db) -> EventAccept
     if len(bindings) > 25:
         raise HTTPException(status_code=429, detail="Too many event subscriptions")
     receipt = AppEventReceipt(
+        id=uuid.uuid4(),
         connection_id=connection.id,
         source=event.source,
         event_id=event.id,

@@ -1,6 +1,7 @@
 """Bounded CloudEvents and runtime-configured custom app data contracts."""
 
 import ipaddress
+import math
 import re
 from typing import Any, Literal
 from urllib.parse import urlsplit
@@ -75,7 +76,11 @@ def validate_data(data: dict[str, Any], schema: DataSchema) -> None:
             if kind == "boolean"
             else value is None
         )
-        if not valid or (isinstance(value, str) and len(value) > 2000):
+        if (
+            not valid
+            or (isinstance(value, str) and len(value) > 2000)
+            or (isinstance(value, float) and not math.isfinite(value))
+        ):
             raise ValueError("Event data field has an invalid type or size")
 
 

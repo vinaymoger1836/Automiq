@@ -61,6 +61,10 @@ The [Phase 5 guide](docs/phase5.md) covers the bounded LangGraph agent, encrypte
 
 The [Phase 6 guide](docs/phase6.md) covers metrics and traces, run admission limits, retention dry runs, and the synthetic full-stack operations check. The [deployment guide](docs/deployment.md) records setup decisions and API examples. `/internal/metrics` requires a configured scrape token; run detail and summary cleanup requires an explicit `--apply`.
 
+### Custom app connections
+
+Workspace owners can register custom apps with signed CloudEvents 1.0 event types and an optional HTTPS callback endpoint. Published workflows use a custom app event trigger and a signed callback action. Adding a standards-compliant app uses connection and workflow configuration; it does not require an app-specific Automiq connector. The current data contract supports bounded, flat JSON object fields. See the [Phase 7 guide](docs/phase7.md) for the wire format, local two-app E2E setup, and current verification status. PR merge tracking and durable event correlation are the next implementation slice.
+
 ## Current boundaries
 
 - The [API](apps/api/app/main.py) handles identity, workspace authorization, workflow definitions, and read APIs. Browser mutations use a signed session and CSRF token.

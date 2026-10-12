@@ -1,6 +1,6 @@
 # ADR-006: Custom application integration contract
 
-Status: Proposed. This document does not authorize implementation or change the current architecture.
+Status: Accepted for implementation by the user's 2026-10-12 request. The generic event/callback slice is implemented; full-stack verification and the GitHub PR correlation slice are pending.
 
 ## Context
 

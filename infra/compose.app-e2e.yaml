@@ -1,0 +1,25 @@
+# Synthetic custom-app HTTPS receiver and strict test-only private host override.
+services:
+  api:
+    environment:
+      APP_ENV: test
+      INTEGRATION_ENCRYPTION_KEY: ${INTEGRATION_ENCRYPTION_KEY:?Generate an ephemeral 32-byte base64 key}
+  worker:
+    environment:
+      APP_ENV: test
+      INTEGRATION_ENCRYPTION_KEY: ${INTEGRATION_ENCRYPTION_KEY:?Generate an ephemeral 32-byte base64 key}
+      APP_CALLBACK_TEST_PRIVATE_HOST: fake-app
+      APP_CALLBACK_TEST_CA_FILE: /test-tls/cert.crt
+    volumes:
+      - ../artifacts/e2e/app-connections/tls:/test-tls:ro
+  fake-app:
+    build: { context: .., dockerfile: services/orchestrator/Dockerfile }
+    command: ["uv", "run", "--frozen", "--no-dev", "python", "/app/scripts/fake_app_provider.py"]
+    volumes:
+      - ../artifacts/e2e/app-connections/tls:/test-tls:ro
+      - ../artifacts/e2e/app-connections:/test-evidence
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.create_connection(('localhost',8443),2); s.close()"]
+      interval: 3s
+      timeout: 3s
+      retries: 20

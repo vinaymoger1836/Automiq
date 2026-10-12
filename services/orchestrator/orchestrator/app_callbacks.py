@@ -120,6 +120,18 @@ async def execute_app_callback(command: dict[str, Any]) -> dict[str, Any]:
         url = connection.callback_url
         workspace_id = run.workspace_id
         secret = credentials["outbound_secret"]
+        envelope = {
+            "specversion": "1.0",
+            "id": event_id,
+            "source": f"urn:automiq:workspace:{workspace_id}",
+            "type": event_type,
+            "subject": f"runs/{run_id}",
+            "datacontenttype": "application/json",
+            "data": data,
+        }
+        body = json.dumps(envelope, sort_keys=True, separators=(",", ":")).encode()
+        if len(body) > 16_000:
+            raise ApplicationError("Callback too large", non_retryable=True)
         async with db.begin_nested():
             delivery = await db.scalar(
                 select(AppCallbackDelivery)
@@ -142,23 +154,12 @@ async def execute_app_callback(command: dict[str, Any]) -> dict[str, Any]:
                     node_id=node_id,
                     event_id=event_id,
                     status="pending",
+                    attempts=0,
                 )
                 db.add(delivery)
             delivery.attempts += 1
             attempts = delivery.attempts
         await db.commit()
-    envelope = {
-        "specversion": "1.0",
-        "id": event_id,
-        "source": f"urn:automiq:workspace:{workspace_id}",
-        "type": event_type,
-        "subject": f"runs/{run_id}",
-        "datacontenttype": "application/json",
-        "data": data,
-    }
-    body = json.dumps(envelope, sort_keys=True, separators=(",", ":")).encode()
-    if len(body) > 16_000:
-        raise ApplicationError("Callback too large", non_retryable=True)
     try:
         await post_callback(url, body, secret)
     except CallbackError as exc:
@@ -172,7 +173,7 @@ async def execute_app_callback(command: dict[str, Any]) -> dict[str, Any]:
                     .with_for_update()
                 )
                 if delivery is not None:
-                    delivery.status = "pending" if exc.retryable else "failed"
+                    delivery.status = "pending" if exc.retryable and attempts < 3 else "failed"
                     delivery.last_error = exc.code
         raise ApplicationError(exc.code, non_retryable=not exc.retryable) from None
     async with session_factory()() as db:

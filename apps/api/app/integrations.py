@@ -126,7 +126,7 @@ class TriggerOut(BaseModel):
     enabled: bool
     webhook_path: str | None
     webhook_url: str | None
-    config: dict[str, str]
+    config: dict[str, str | int]
 
 
 class GithubRepo(BaseModel):
