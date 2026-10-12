@@ -13,7 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from app.auth import Db, UserDep, membership, require_csrf
 from app.config import get_settings
 from app.graph import EMPTY_GRAPH, Diagnostic, Graph, validate_graph
-from app.models import AuditLog, Integration, Membership, User, Workflow, WorkflowVersion, Workspace
+from app.models import AppConnection, AuditLog, Integration, Membership, User, Workflow, WorkflowVersion, Workspace
 
 router = APIRouter(prefix="/api/v1", tags=["workflows"])
 
@@ -378,6 +378,34 @@ async def publish(
     diagnostics = runnable_diagnostics(graph)
     for node in graph.nodes:
         integration_id: uuid.UUID | None
+        if node.type == "action.app_callback":
+            connection = await db.scalar(
+                select(AppConnection).where(
+                    AppConnection.id == node.config.connection_id,
+                    AppConnection.workspace_id == ws,
+                    AppConnection.revoked_at.is_(None),
+                )
+            )
+            schema = (
+                connection.outbound_schemas.get(node.config.event_type)
+                if connection is not None
+                else None
+            )
+            if (
+                connection is None
+                or connection.callback_url is None
+                or connection.contract_version != node.config.contract_version
+                or schema is None
+                or set(node.config.data_paths) != set(schema.get("properties", {}))
+            ):
+                diagnostics.append(
+                    Diagnostic(
+                        code="invalid_app_connection",
+                        message="Callback needs an active same-workspace connection and complete field mapping",
+                        node_id=node.id,
+                    )
+                )
+            continue
         if node.type == "action.github_comment":
             provider = "github"
             integration_id = node.config.integration_id

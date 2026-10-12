@@ -24,6 +24,31 @@ class ScheduleConfig(StrictModel):
     pass
 
 
+class AppEventConfig(StrictModel):
+    pass
+
+
+class AppCallbackConfig(StrictModel):
+    connection_id: uuid.UUID
+    contract_version: int = Field(default=1, ge=1)
+    event_type: str = Field(pattern=r"^[a-z][a-z0-9_.-]{2,79}$")
+    data_paths: dict[str, str] = Field(default_factory=dict, max_length=30)
+
+    @model_validator(mode="after")
+    def valid_mappings(self) -> "AppCallbackConfig":
+        if any(
+            not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,39}", name)
+            or not re.fullmatch(
+                r"(?:trigger\.payload|steps\.[A-Za-z][A-Za-z0-9_-]{0,63}\.output)"
+                r"(?:\.[A-Za-z][A-Za-z0-9_]{0,39})*",
+                path,
+            )
+            for name, path in self.data_paths.items()
+        ):
+            raise ValueError("Callback fields must map to trigger or step output paths")
+        return self
+
+
 class HttpConfig(StrictModel):
     operation: Literal["mock", "https_get"] = "mock"
     mock_output: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
@@ -171,6 +196,13 @@ class ScheduleNode(StrictModel):
     position: Position | None = None
 
 
+class AppEventNode(StrictModel):
+    id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
+    type: Literal["trigger.app_event"]
+    config: AppEventConfig
+    position: Position | None = None
+
+
 class HttpNode(StrictModel):
     id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
     type: Literal["action.http"]
@@ -206,6 +238,13 @@ class SlackMessageNode(StrictModel):
     position: Position | None = None
 
 
+class AppCallbackNode(StrictModel):
+    id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
+    type: Literal["action.app_callback"]
+    config: AppCallbackConfig
+    position: Position | None = None
+
+
 class AgentNode(StrictModel):
     id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
     type: Literal["agent"]
@@ -224,9 +263,11 @@ Node = Annotated[
     ManualNode
     | GithubIssueNode
     | ScheduleNode
+    | AppEventNode
     | HttpNode
     | GithubCommentNode
     | SlackMessageNode
+    | AppCallbackNode
     | AgentNode
     | ApprovalNode
     | ConditionNode
@@ -302,7 +343,7 @@ def validate_graph(graph: Graph) -> list[Diagnostic]:
             add("outgoing_count", "Node needs one unlabeled outgoing edge", node.id)
         if node.type != "condition" and any(edge.source_handle is not None for edge in outs):
             add("invalid_handle", "Only conditions may have branch handles", node.id)
-        if node.type in {"action.github_comment", "action.slack_message"}:
+        if node.type in {"action.github_comment", "action.slack_message", "action.app_callback"}:
             current = node.id
             has_approval = False
             seen: set[str] = set()
@@ -374,6 +415,18 @@ def validate_graph(graph: Graph) -> list[Diagnostic]:
                         current = incoming[current][0].source
                     if source not in ancestors and source != current:
                         add("non_upstream_reference", "Expression step must be upstream", node.id)
+        if isinstance(node, AppCallbackNode):
+            for path in node.config.data_paths.values():
+                if not path.startswith("steps."):
+                    continue
+                source = path.split(".", 2)[1]
+                current = node.id
+                ancestors: set[str] = set()
+                while len(incoming[current]) == 1 and current not in ancestors:
+                    current = incoming[current][0].source
+                    ancestors.add(current)
+                if source not in ancestors:
+                    add("non_upstream_reference", "Callback field must use an upstream step", node.id)
     return errors
 
 
