@@ -357,7 +357,7 @@ class Trigger(Base):
     __tablename__ = "triggers"
     __table_args__ = (
         UniqueConstraint("public_id", name="uq_triggers_public_id"),
-        CheckConstraint("type IN ('github.issue','schedule')", name="type_valid"),
+        CheckConstraint("type IN ('github.issue','schedule','app.event')", name="type_valid"),
         Index("ix_triggers_workspace_workflow", "workspace_id", "workflow_id"),
     )
 
@@ -433,3 +433,87 @@ class WebhookDelivery(Base):
     received_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+class AppConnection(Base):
+    __tablename__ = "app_connections"
+    __table_args__ = (
+        UniqueConstraint("public_id", name="uq_app_connections_public_id"),
+        UniqueConstraint("id", "workspace_id", name="uq_app_connections_id_workspace"),
+        CheckConstraint("key_version > 0", name="key_version_positive"),
+        CheckConstraint("credential_version > 0", name="credential_version_positive"),
+        Index("ix_app_connections_workspace", "workspace_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    public_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=False
+    )
+    display_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    callback_url: Mapped[str | None] = mapped_column(String(500))
+    inbound_schemas: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    outbound_schemas: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    contract_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    encrypted_credentials: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    key_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    credential_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class AppEventReceipt(Base):
+    __tablename__ = "app_event_receipts"
+    __table_args__ = (
+        UniqueConstraint("connection_id", "source", "event_id", name="uq_app_event_identity"),
+        Index("ix_app_event_receipts_received", "received_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    connection_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("app_connections.id"), nullable=False
+    )
+    source: Mapped[str] = mapped_column(String(255), nullable=False)
+    event_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    run_ids_json: Mapped[list[str]] = mapped_column("run_ids", JSONB, nullable=False)
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class AppCallbackDelivery(Base):
+    __tablename__ = "app_callback_deliveries"
+    __table_args__ = (
+        UniqueConstraint("run_id", "node_id", name="uq_app_callback_run_node"),
+        UniqueConstraint("event_id", name="uq_app_callback_event_id"),
+        CheckConstraint("status IN ('pending','delivered','failed')", name="status_valid"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=False
+    )
+    connection_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("app_connections.id"), nullable=False
+    )
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("workflow_runs.id"), nullable=False
+    )
+    node_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    event_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default=text("'pending'"))
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    last_error: Mapped[str | None] = mapped_column(String(120))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
