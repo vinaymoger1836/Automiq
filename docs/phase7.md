@@ -54,3 +54,9 @@ The API E2E creates two synthetic apps through the same UI/API-independent contr
 - `docker compose --env-file .env --env-file .env.app-e2e.local -f infra/compose.yaml -f infra/compose.app-e2e.yaml exec -T worker uv run --frozen --no-dev python scripts/smoke.py`: passed Temporal activity and PostgreSQL connection.
 
 The passing run used Windows, Python 3.12.10, Node.js 24.15.0, uv 0.12.23, Playwright 1.64.0 with Chromium, Docker Engine 29.6.2, PostgreSQL 16.6, Redis 7.4.2, Temporal 1.27.2, Next.js 16.4.0, and a synthetic HTTPS callback receiver. No real external API was called by the E2E profile.
+
+## Local sign-in origin fix (2026-10-12)
+
+Local owner sign-in previously returned `403 Origin check failed` when the studio was opened at `http://127.0.0.1:3000` while `WEB_ORIGIN=http://localhost:3000`. Development/test mode now accepts these two equivalent HTTP loopback origins on the configured port for sign-in, CSRF-protected writes, and CORS. Production still accepts only the configured origin. The initial `401` from `/api/v1/me` before sign-in is expected.
+
+After rebuilding the API with `docker compose --env-file .env --env-file .env.app-e2e.local -f infra/compose.yaml -f infra/compose.app-e2e.yaml up -d --build api`, `Push-Location apps/web; .\node_modules\.bin\playwright.cmd test --config=playwright.app-connections.config.ts; Pop-Location` passed two Chromium scenarios: owner sign-in and workspace creation from both loopback URLs, plus the existing custom-app UI flow. The ignored JUnit report is `artifacts/e2e/app-connections/playwright.xml`. Direct synthetic requests returned `200` from each loopback origin and `403` with a foreign or missing origin.

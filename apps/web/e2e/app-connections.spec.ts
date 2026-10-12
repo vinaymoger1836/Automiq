@@ -5,6 +5,18 @@ import { expect, test } from "@playwright/test";
 
 const evidenceDir = resolve(process.cwd(), "../../artifacts/e2e/app-connections/browser");
 
+test("local owner can sign in and create a workspace from both loopback URLs", async ({ page }) => {
+  for (const origin of ["http://localhost:3000", "http://127.0.0.1:3000"]) {
+    await page.goto(`${origin}/studio`);
+    await page.getByRole("button", { name: "Sign in as owner" }).click();
+    await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
+    const name = `Loopback ${randomUUID().slice(0, 8)}`;
+    await page.getByLabel("New workspace").fill(name);
+    await page.getByRole("button", { name: "Create workspace" }).click();
+    await expect(page.getByLabel("Current workspace")).toContainText(name);
+  }
+});
+
 test("owner registers a custom app without a provider-specific connector", async ({ page }) => {
   mkdirSync(evidenceDir, { recursive: true });
   await page.setViewportSize({ width: 1280, height: 900 });

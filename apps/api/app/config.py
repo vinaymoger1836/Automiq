@@ -48,6 +48,19 @@ class Settings(BaseSettings):
     app_callback_test_private_host: str = ""
     app_callback_test_ca_file: str = ""
 
+    def allowed_web_origins(self) -> tuple[str, ...]:
+        """Accept the two equivalent HTTP loopback URLs only in local/test mode."""
+        origins = [self.web_origin]
+        if self.app_env not in {"development", "test"}:
+            return tuple(origins)
+        parsed = urlsplit(self.web_origin)
+        if parsed.scheme != "http" or parsed.hostname not in {"localhost", "127.0.0.1"}:
+            return tuple(origins)
+        alternate = "127.0.0.1" if parsed.hostname == "localhost" else "localhost"
+        port = f":{parsed.port}" if parsed.port is not None else ""
+        origins.append(f"http://{alternate}{port}")
+        return tuple(origins)
+
     @model_validator(mode="after")
     def production_auth_config(self) -> "Settings":
         if self.run_summary_retention_days <= self.run_detail_retention_days:

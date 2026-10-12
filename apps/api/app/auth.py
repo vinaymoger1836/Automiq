@@ -57,7 +57,7 @@ def require_csrf(request: Request) -> None:
     origin = request.headers.get("origin")
     token = request.headers.get("x-csrf-token")
     if (
-        origin != settings.web_origin
+        origin not in settings.allowed_web_origins()
         or not token
         or not secrets.compare_digest(token, request.session.get("csrf_token", ""))
     ):
@@ -67,7 +67,7 @@ def require_csrf(request: Request) -> None:
 def require_dev_origin(request: Request) -> None:
     if get_settings().app_env not in {"development", "test"}:
         raise HTTPException(status_code=404, detail="Not found")
-    if request.headers.get("origin") != get_settings().web_origin:
+    if request.headers.get("origin") not in get_settings().allowed_web_origins():
         raise HTTPException(status_code=403, detail="Origin check failed")
 
 
