@@ -23,6 +23,7 @@ from orchestrator.activities import (
     open_approval,
     project_event,
 )
+from orchestrator.app_callbacks import execute_app_callback
 from orchestrator.engine import WorkflowExecution
 from orchestrator.schedule_engine import ScheduleFire
 from orchestrator.schedules import create_scheduled_run, reconcile_schedules
@@ -69,6 +70,7 @@ async def main() -> None:
             execute_mock_action,
             execute_https_action,
             execute_provider_activity,
+            execute_app_callback,
             execute_agent,
             open_approval,
             approval_status,
