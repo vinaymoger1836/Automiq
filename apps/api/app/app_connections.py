@@ -3,6 +3,7 @@
 import hashlib
 import hmac
 import json
+import logging
 import secrets
 import time
 import uuid
@@ -11,7 +12,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, ValidationError, model_validator
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from app.app_contract import (
@@ -40,6 +41,7 @@ from app.models import (
 from app.observability import current_traceparent
 
 router = APIRouter(prefix="/api/v1", tags=["app-connections"])
+logger = logging.getLogger(__name__)
 MAX_EVENT_BYTES = 16_000
 
 
@@ -303,6 +305,7 @@ async def bind_app_trigger(
     ):
         raise HTTPException(status_code=409, detail="Published graph needs an app event trigger")
     row = Trigger(
+        id=uuid.uuid4(),
         public_id=secrets.token_urlsafe(24),
         workspace_id=ws,
         workflow_id=workflow_id,
@@ -315,6 +318,17 @@ async def bind_app_trigger(
         },
     )
     db.add(row)
+    db.add(
+        AuditLog(
+            workspace_id=ws,
+            actor_type="user",
+            actor_id=user.id,
+            action="app_event.bind",
+            resource_type="triggers",
+            resource_id=row.id,
+            metadata_json={"event_type": body.event_type},
+        )
+    )
     await db.commit()
     return AppTriggerOut(
         id=row.id,
@@ -404,8 +418,6 @@ async def receive_event(public_id: str, request: Request, db: Db) -> EventAccept
             duplicate=True,
         )
     await admit_request("app_event", connection.id, get_settings().app_events_per_minute)
-    if not await workspace_has_capacity(db, connection.workspace_id):
-        raise HTTPException(status_code=429, detail="Workspace active run limit exceeded")
     candidates = await db.scalars(
         select(Trigger).where(
             Trigger.workspace_id == connection.workspace_id,
@@ -422,6 +434,17 @@ async def receive_event(public_id: str, request: Request, db: Db) -> EventAccept
     ]
     if len(bindings) > 25:
         raise HTTPException(status_code=429, detail="Too many event subscriptions")
+    if bindings:
+        if not await workspace_has_capacity(db, connection.workspace_id):
+            raise HTTPException(status_code=429, detail="Workspace active run limit exceeded")
+        active_count = await db.scalar(
+            select(func.count()).select_from(WorkflowRun).where(
+                WorkflowRun.workspace_id == connection.workspace_id,
+                WorkflowRun.status.in_(["queued", "running"]),
+            )
+        )
+        if (active_count or 0) + len(bindings) > get_settings().workspace_active_run_limit:
+            raise HTTPException(status_code=429, detail="Workspace active run limit exceeded")
     receipt = AppEventReceipt(
         id=uuid.uuid4(),
         connection_id=connection.id,
@@ -453,6 +476,8 @@ async def receive_event(public_id: str, request: Request, db: Db) -> EventAccept
                 status="queued",
             )
         )
+        # Persist the parent before its outbox/event rows; those rows reference run_id.
+        await db.flush()
         db.add(RunStartOutbox(run_id=run_id))
         db.add(
             RunEvent(
@@ -477,8 +502,14 @@ async def receive_event(public_id: str, request: Request, db: Db) -> EventAccept
     )
     try:
         await db.commit()
-    except IntegrityError:
+    except IntegrityError as exc:
         await db.rollback()
+        diagnostic = getattr(exc.orig, "diag", None)
+        logger.warning(
+            "App event intake integrity conflict: constraint=%s sqlstate=%s",
+            getattr(diagnostic, "constraint_name", None),
+            getattr(exc.orig, "sqlstate", None),
+        )
         raise HTTPException(status_code=409, detail="Event intake conflict") from None
     return EventAccepted(
         event_id=event.id,

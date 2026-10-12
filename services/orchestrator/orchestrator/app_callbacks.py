@@ -92,6 +92,17 @@ async def execute_app_callback(command: dict[str, Any]) -> dict[str, Any]:
         run = await db.get(WorkflowRun, run_id)
         if run is None:
             raise ApplicationError("Run missing", non_retryable=True)
+        completed = await db.scalar(
+            select(AppCallbackDelivery).where(
+                AppCallbackDelivery.run_id == run_id,
+                AppCallbackDelivery.node_id == node_id,
+            )
+        )
+        if completed is not None and completed.status == "delivered":
+            return {
+                "output": {"delivered": True, "event_id": event_id},
+                "attempts": completed.attempts,
+            }
         connection = await db.scalar(
             select(AppConnection).where(
                 AppConnection.id == connection_id,

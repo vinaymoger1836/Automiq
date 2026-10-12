@@ -16,6 +16,7 @@ services:
     build: { context: .., dockerfile: services/orchestrator/Dockerfile }
     command: ["uv", "run", "--frozen", "--no-dev", "python", "/app/scripts/fake_app_provider.py"]
     volumes:
+      - ../scripts/fake_app_provider.py:/app/scripts/fake_app_provider.py:ro
       - ../artifacts/e2e/app-connections/tls:/test-tls:ro
       - ../artifacts/e2e/app-connections:/test-evidence
     healthcheck:

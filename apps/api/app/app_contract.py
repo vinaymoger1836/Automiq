@@ -28,8 +28,15 @@ class DataSchema(BaseModel):
 
     @model_validator(mode="after")
     def valid_fields(self) -> "DataSchema":
-        if any(not FIELD_NAME.fullmatch(name) for name in self.properties):
-            raise ValueError("Schema property names must be simple identifiers")
+        if any(
+            not FIELD_NAME.fullmatch(name)
+            or any(
+                marker in name.lower()
+                for marker in ("secret", "token", "password", "credential", "authorization")
+            )
+            for name in self.properties
+        ):
+            raise ValueError("Schema property names must be simple non-secret identifiers")
         if (
             len(set(self.required)) != len(self.required)
             or not set(self.required) <= self.properties.keys()

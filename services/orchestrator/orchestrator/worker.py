@@ -1,13 +1,13 @@
 import asyncio
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from app.config import get_settings
 from app.db import session_factory
 from app.models import Approval, RunStartOutbox, WorkflowRun
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import create_async_engine
-from temporalio import activity, workflow
+from temporalio import activity
 from temporalio.client import Client
 from temporalio.common import WorkflowIDReusePolicy
 from temporalio.exceptions import WorkflowAlreadyStartedError
@@ -24,6 +24,7 @@ from orchestrator.activities import (
     project_event,
 )
 from orchestrator.app_callbacks import execute_app_callback
+from orchestrator.bootstrap_workflow import BootstrapCheck
 from orchestrator.engine import WorkflowExecution
 from orchestrator.schedule_engine import ScheduleFire
 from orchestrator.schedules import create_scheduled_run, reconcile_schedules
@@ -40,15 +41,6 @@ async def check_postgres() -> str:
         return "postgres-ok"
     finally:
         await engine.dispose()
-
-
-@workflow.defn
-class BootstrapCheck:
-    @workflow.run
-    async def run(self) -> str:
-        return await workflow.execute_activity(
-            check_postgres, start_to_close_timeout=timedelta(seconds=10)
-        )
 
 
 async def main() -> None:

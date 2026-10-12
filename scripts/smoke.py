@@ -3,7 +3,7 @@ import uuid
 from datetime import timedelta
 
 from app.config import get_settings
-from orchestrator.worker import BootstrapCheck
+from orchestrator.bootstrap_workflow import BootstrapCheck
 from temporalio.client import Client
 
 

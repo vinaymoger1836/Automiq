@@ -162,6 +162,18 @@ async def run() -> None:
         )
         check(created.status_code == 201, "workspace created")
         ws = created.json()["id"]
+        blocked = await mutate(
+            owner,
+            f"/api/v1/workspaces/{ws}/app-connections",
+            csrf,
+            {
+                "display_name": "Unsafe destination",
+                "callback_url": "https://169.254.169.254/latest",
+                "inbound_schemas": {},
+                "outbound_schemas": {"com.automiq.item.completed.v1": schema()},
+            },
+        )
+        check(blocked.status_code == 422, "metadata callback destination rejected")
         connections: list[dict[str, Any]] = []
         run_ids: list[str] = []
         for index, callback_path in enumerate(("/app-one/events", "/app-two/retry"), start=1):
@@ -187,12 +199,20 @@ async def run() -> None:
             raw = event_bytes(event_id, f"urn:synthetic:app:{index}", f"item-{nonce}-{index}")
             bad = await deliver(owner, connection["webhook_url"], raw, "wrong-local-key")
             check(bad.status_code == 401, f"app {index} forged signature rejected")
+            invalid_data = await deliver(
+                owner,
+                connection["webhook_url"],
+                raw.replace(b'"item_id"', b'"unknown"'),
+                connection["inbound_secret"],
+            )
+            check(invalid_data.status_code == 422, f"app {index} undeclared field rejected")
             accepted = await deliver(
                 owner, connection["webhook_url"], raw, connection["inbound_secret"]
             )
             check(
                 accepted.status_code == 202 and len(accepted.json()["run_ids"]) == 1,
-                f"app {index} event queued one run",
+                f"app {index} event queued one run: HTTP {accepted.status_code} "
+                f"{accepted.text[:200]}",
             )
             run_id = accepted.json()["run_ids"][0]
             run_ids.append(run_id)
@@ -291,6 +311,8 @@ def main() -> None:
         result["status"] = "passed"
     except Exception as exc:
         result["failure"] = type(exc).__name__
+        if isinstance(exc, AssertionError):
+            result["failed_check"] = str(exc)
         failed = True
     finally:
         result["count"] = len(SCENARIOS)
