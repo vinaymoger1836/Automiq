@@ -179,6 +179,63 @@ class WorkflowExecution:
                     return "failed"
                 result = action["output"]
                 attempts = action["attempts"]
+            elif kind in {"wait.app_event", "wait.github_pr_merge"}:
+                config = node["config"]
+                deadline = workflow.now() + timedelta(seconds=config["timeout_seconds"])
+                poll_index = 0
+                while True:
+                    if workflow.now() >= deadline:
+                        await project(
+                            run_id, "step.failed", f"{current}:terminal-failed",
+                            node_id=current, error="wait_timeout",
+                        )
+                        await project(run_id, "run.failed", "run:failed", error="wait_timeout")
+                        return "failed"
+                    if kind == "wait.app_event":
+                        activity_name = "check_app_event_wait"
+                        command = {
+                            "run_id": run_id,
+                            "config": config,
+                            "correlation_value": read_path(
+                                config["trigger_path"], trigger, outputs
+                            ),
+                        }
+                    else:
+                        activity_name = "check_github_pr_merge"
+                        command = {
+                            "run_id": run_id,
+                            "config": config,
+                            "pr_number": read_path(config["pr_number_path"], trigger, outputs),
+                            "poll_index": poll_index,
+                        }
+                    try:
+                        wait_status: dict[str, Any] = await workflow.execute_activity(
+                            activity_name, command,
+                            start_to_close_timeout=timedelta(seconds=20),
+                            retry_policy=ACTION_RETRY,
+                        )
+                    except ActivityError:
+                        await project(
+                            run_id, "step.failed", f"{current}:terminal-failed",
+                            node_id=current, error="wait_check_failed",
+                        )
+                        await project(run_id, "run.failed", "run:failed", error="wait_check_failed")
+                        return "failed"
+                    if wait_status["state"] in {"matched", "merged"}:
+                        result = wait_status
+                        break
+                    if wait_status["state"] == "closed_unmerged":
+                        await project(
+                            run_id, "step.failed", f"{current}:terminal-failed",
+                            node_id=current, error="pr_closed_unmerged",
+                        )
+                        await project(
+                            run_id, "run.failed", "run:failed", error="pr_closed_unmerged"
+                        )
+                        return "failed"
+                    poll_index += 1
+                    remaining = (deadline - workflow.now()).total_seconds()
+                    await workflow.sleep(timedelta(seconds=min(config["poll_seconds"], remaining)))
             elif kind == "agent":
                 try:
                     result = await workflow.execute_activity(

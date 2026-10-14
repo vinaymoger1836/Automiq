@@ -387,6 +387,42 @@ async def publish(
     diagnostics = runnable_diagnostics(graph)
     for node in graph.nodes:
         integration_id: uuid.UUID | None
+        if node.type == "wait.app_event":
+            connection = await db.scalar(
+                select(AppConnection).where(
+                    AppConnection.id == node.config.connection_id,
+                    AppConnection.workspace_id == ws,
+                    AppConnection.revoked_at.is_(None),
+                )
+            )
+            schema = (
+                connection.inbound_schemas.get(node.config.event_type)
+                if connection is not None
+                else None
+            )
+            field = (
+                schema.get("properties", {}).get(node.config.correlation_field)
+                if schema else None
+            )
+            required = schema.get("required", []) if schema else []
+            if (
+                connection is None
+                or connection.contract_version != node.config.contract_version
+                or field is None
+                or field.get("type") not in {"string", "integer"}
+                or node.config.correlation_field not in required
+            ):
+                diagnostics.append(
+                    Diagnostic(
+                        code="invalid_app_wait",
+                        message=(
+                            "Wait needs an active connection and required string or integer "
+                            "correlation field"
+                        ),
+                        node_id=node.id,
+                    )
+                )
+            continue
         if node.type == "action.app_callback":
             connection = await db.scalar(
                 select(AppConnection).where(
@@ -423,6 +459,9 @@ async def publish(
             integration_id = node.config.integration_id
         elif node.type == "action.zoho_task_status":
             provider = "zoho_projects"
+            integration_id = node.config.integration_id
+        elif node.type == "wait.github_pr_merge":
+            provider = "github"
             integration_id = node.config.integration_id
         elif node.type == "agent" and node.config.allowed_tools:
             provider = "github"

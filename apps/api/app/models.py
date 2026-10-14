@@ -473,6 +473,8 @@ class AppEventReceipt(Base):
     __table_args__ = (
         UniqueConstraint("connection_id", "source", "event_id", name="uq_app_event_identity"),
         Index("ix_app_event_receipts_received", "received_at"),
+        Index("ix_app_event_receipts_match", "connection_id", "event_type", "received_at"),
+        Index("ix_app_event_receipts_data", "event_data", postgresql_using="gin"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -483,6 +485,8 @@ class AppEventReceipt(Base):
     )
     source: Mapped[str] = mapped_column(String(255), nullable=False)
     event_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    event_type: Mapped[str | None] = mapped_column(String(80))
+    data_json: Mapped[dict[str, Any]] = mapped_column("event_data", JSONB, nullable=False)
     payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     run_ids_json: Mapped[list[str]] = mapped_column("run_ids", JSONB, nullable=False)
     received_at: Mapped[datetime] = mapped_column(

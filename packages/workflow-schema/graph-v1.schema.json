@@ -272,6 +272,95 @@
       "title": "AppEventNode",
       "type": "object"
     },
+    "AppEventWaitConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "connection_id": {
+          "format": "uuid",
+          "title": "Connection Id",
+          "type": "string"
+        },
+        "contract_version": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Contract Version",
+          "type": "integer"
+        },
+        "event_type": {
+          "pattern": "^[a-z][a-z0-9_.-]{2,79}$",
+          "title": "Event Type",
+          "type": "string"
+        },
+        "correlation_field": {
+          "pattern": "^[A-Za-z][A-Za-z0-9_]{0,39}$",
+          "title": "Correlation Field",
+          "type": "string"
+        },
+        "trigger_path": {
+          "pattern": "^trigger\\.payload\\.[A-Za-z][A-Za-z0-9_]{0,39}$",
+          "title": "Trigger Path",
+          "type": "string"
+        },
+        "timeout_seconds": {
+          "default": 3600,
+          "maximum": 604800,
+          "minimum": 5,
+          "title": "Timeout Seconds",
+          "type": "integer"
+        },
+        "poll_seconds": {
+          "default": 30,
+          "maximum": 300,
+          "minimum": 5,
+          "title": "Poll Seconds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "connection_id",
+        "event_type",
+        "correlation_field",
+        "trigger_path"
+      ],
+      "title": "AppEventWaitConfig",
+      "type": "object"
+    },
+    "AppEventWaitNode": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "wait.app_event",
+          "title": "Type",
+          "type": "string"
+        },
+        "config": {
+          "$ref": "#/$defs/AppEventWaitConfig"
+        },
+        "position": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Position"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "config"
+      ],
+      "title": "AppEventWaitNode",
+      "type": "object"
+    },
     "ApprovalConfig": {
       "additionalProperties": false,
       "properties": {
@@ -604,6 +693,77 @@
       "title": "GithubIssueNode",
       "type": "object"
     },
+    "GithubPrMergeWaitConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "integration_id": {
+          "format": "uuid",
+          "title": "Integration Id",
+          "type": "string"
+        },
+        "pr_number_path": {
+          "pattern": "^trigger\\.payload\\.[A-Za-z][A-Za-z0-9_]{0,39}$",
+          "title": "Pr Number Path",
+          "type": "string"
+        },
+        "timeout_seconds": {
+          "default": 86400,
+          "maximum": 604800,
+          "minimum": 5,
+          "title": "Timeout Seconds",
+          "type": "integer"
+        },
+        "poll_seconds": {
+          "default": 60,
+          "maximum": 300,
+          "minimum": 5,
+          "title": "Poll Seconds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "integration_id",
+        "pr_number_path"
+      ],
+      "title": "GithubPrMergeWaitConfig",
+      "type": "object"
+    },
+    "GithubPrMergeWaitNode": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "wait.github_pr_merge",
+          "title": "Type",
+          "type": "string"
+        },
+        "config": {
+          "$ref": "#/$defs/GithubPrMergeWaitConfig"
+        },
+        "position": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Position"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "config"
+      ],
+      "title": "GithubPrMergeWaitNode",
+      "type": "object"
+    },
     "HttpConfig": {
       "additionalProperties": false,
       "properties": {
@@ -896,6 +1056,63 @@
       ],
       "title": "SlackMessageNode",
       "type": "object"
+    },
+    "ZohoTaskStatusConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "integration_id": {
+          "format": "uuid",
+          "title": "Integration Id",
+          "type": "string"
+        },
+        "status_id": {
+          "pattern": "^[0-9]{1,30}$",
+          "title": "Status Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "integration_id",
+        "status_id"
+      ],
+      "title": "ZohoTaskStatusConfig",
+      "type": "object"
+    },
+    "ZohoTaskStatusNode": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "action.zoho_task_status",
+          "title": "Type",
+          "type": "string"
+        },
+        "config": {
+          "$ref": "#/$defs/ZohoTaskStatusConfig"
+        },
+        "position": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Position"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "config"
+      ],
+      "title": "ZohoTaskStatusNode",
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -913,6 +1130,7 @@
             "action.github_comment": "#/$defs/GithubCommentNode",
             "action.http": "#/$defs/HttpNode",
             "action.slack_message": "#/$defs/SlackMessageNode",
+            "action.zoho_task_status": "#/$defs/ZohoTaskStatusNode",
             "agent": "#/$defs/AgentNode",
             "approval": "#/$defs/ApprovalNode",
             "condition": "#/$defs/ConditionNode",
@@ -920,7 +1138,9 @@
             "trigger.app_event": "#/$defs/AppEventNode",
             "trigger.github_issue": "#/$defs/GithubIssueNode",
             "trigger.manual": "#/$defs/ManualNode",
-            "trigger.schedule": "#/$defs/ScheduleNode"
+            "trigger.schedule": "#/$defs/ScheduleNode",
+            "wait.app_event": "#/$defs/AppEventWaitNode",
+            "wait.github_pr_merge": "#/$defs/GithubPrMergeWaitNode"
           },
           "propertyName": "type"
         },
@@ -947,7 +1167,16 @@
             "$ref": "#/$defs/SlackMessageNode"
           },
           {
+            "$ref": "#/$defs/ZohoTaskStatusNode"
+          },
+          {
             "$ref": "#/$defs/AppCallbackNode"
+          },
+          {
+            "$ref": "#/$defs/AppEventWaitNode"
+          },
+          {
+            "$ref": "#/$defs/GithubPrMergeWaitNode"
           },
           {
             "$ref": "#/$defs/AgentNode"

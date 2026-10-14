@@ -12,12 +12,12 @@ import type { Graph, GraphEdge, GraphNode, NodeKind, Run } from "@/lib/studio-ap
 const labels: Record<NodeKind, string> = {
   "trigger.manual": "Manual trigger", "trigger.github_issue": "GitHub issue", "trigger.schedule": "Schedule", "trigger.app_event": "Custom app event",
   "action.http": "HTTP action", "action.github_comment": "GitHub comment",
-  "action.slack_message": "Slack message", "action.zoho_task_status": "Zoho task status", "action.app_callback": "App callback", agent: "AI agent", approval: "Approval", condition: "Condition", end: "End",
+  "action.slack_message": "Slack message", "action.zoho_task_status": "Zoho task status", "action.app_callback": "App callback", "wait.app_event": "Wait for app event", "wait.github_pr_merge": "Wait for PR merge", agent: "AI agent", approval: "Approval", condition: "Condition", end: "End",
 };
 const initials: Record<NodeKind, string> = {
   "trigger.manual": "TR", "trigger.github_issue": "GH", "trigger.schedule": "SC", "trigger.app_event": "AP",
   "action.http": "HT", "action.github_comment": "GH", "action.slack_message": "SL", "action.zoho_task_status": "ZP", "action.app_callback": "AP",
-  agent: "AI", approval: "OK", condition: "IF", end: "EN",
+  "wait.app_event": "WT", "wait.github_pr_merge": "PR", agent: "AI", approval: "OK", condition: "IF", end: "EN",
 };
 
 type FlowData = { label: string; kind: NodeKind; status: string; selected: boolean } & Record<string, unknown>;
@@ -40,7 +40,7 @@ function WorkflowNode({ data }: NodeProps<FlowNode>) {
 const nodeTypes = { workflow: WorkflowNode };
 
 function newNode(kind: NodeKind, graph: Graph, position: { x: number; y: number }): GraphNode {
-  const stem = kind.startsWith("trigger.") ? "start" : kind.startsWith("action.") ? "action" : kind === "agent" ? "agent" : kind === "approval" ? "approval" : kind === "condition" ? "route" : "end";
+  const stem = kind.startsWith("trigger.") ? "start" : kind.startsWith("action.") ? "action" : kind.startsWith("wait.") ? "wait" : kind === "agent" ? "agent" : kind === "approval" ? "approval" : kind === "condition" ? "route" : "end";
   let index = 1;
   while (graph.nodes.some((node) => node.id === `${stem}_${index}`)) index++;
   const config = kind === "condition" ? { expression: { path: "trigger.payload.flag", operator: "eq", value: true } } :
@@ -48,7 +48,9 @@ function newNode(kind: NodeKind, graph: Graph, position: { x: number; y: number 
     kind === "action.github_comment" ? { integration_id: "00000000-0000-0000-0000-000000000000", body: "Thanks for reporting this issue." } :
     kind === "action.slack_message" ? { integration_id: "00000000-0000-0000-0000-000000000000", channel: "#alerts", text: "New issue received." } :
     kind === "action.zoho_task_status" ? { integration_id: "00000000-0000-0000-0000-000000000000", status_id: "" } :
-    kind === "action.app_callback" ? { connection_id: "00000000-0000-0000-0000-000000000000", contract_version: 1, event_type: "app.event.v1", data_paths: {} } : {};
+    kind === "action.app_callback" ? { connection_id: "00000000-0000-0000-0000-000000000000", contract_version: 1, event_type: "app.event.v1", data_paths: {} } :
+    kind === "wait.app_event" ? { connection_id: "00000000-0000-0000-0000-000000000000", contract_version: 1, event_type: "app.event.v1", correlation_field: "task_id", trigger_path: "trigger.payload.task_id", timeout_seconds: 3600, poll_seconds: 30 } :
+    kind === "wait.github_pr_merge" ? { integration_id: "00000000-0000-0000-0000-000000000000", pr_number_path: "trigger.payload.pr_number", timeout_seconds: 86400, poll_seconds: 60 } : {};
   if (kind === "agent") return { id: `${stem}_${index}`, type: kind, config: {
     model_profile: "fake", instructions: "Classify the issue severity as critical or normal.",
     allowed_tools: [], max_tool_calls: 1, max_duration_seconds: 30,

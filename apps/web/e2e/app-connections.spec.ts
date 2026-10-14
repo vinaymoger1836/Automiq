@@ -51,3 +51,34 @@ test("owner registers a custom app without a provider-specific connector", async
     }
   }
 });
+
+test("owner configures durable wait nodes in both themes and viewport sizes", async ({ page }) => {
+  mkdirSync(evidenceDir, { recursive: true });
+  await page.goto("/studio");
+  await page.getByRole("button", { name: "Sign in as owner" }).click();
+  const nonce = randomUUID().slice(0, 8);
+  await page.getByLabel("New workspace").fill(`Wait UI ${nonce}`);
+  await page.getByRole("button", { name: "Create workspace" }).click();
+  await page.getByLabel("Create a workflow").fill("Wait for completion");
+  await page.getByRole("button", { name: "Create workflow" }).click();
+  const palette = page.getByLabel("Node palette");
+  await palette.getByRole("button", { name: /Wait for app event/ }).click();
+  await expect(page.getByLabel("Required correlation field")).toHaveValue("task_id");
+  await expect(page.getByLabel("Value from starting event")).toHaveValue("trigger.payload.task_id");
+  await palette.getByRole("button", { name: /Wait for PR merge/ }).click();
+  await expect(page.getByLabel("Pull request number path")).toHaveValue("trigger.payload.pr_number");
+  for (const theme of ["light", "dark"] as const) {
+    await page.evaluate((value) => {
+      document.documentElement.dataset.theme = value;
+      localStorage.setItem("automiq-theme", value);
+    }, theme);
+    for (const width of [375, 768, 1280, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      await expect(page.getByLabel("Node inspector")).toBeVisible();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      if (width === 375 || width === 1280) {
+        await page.screenshot({ path: resolve(evidenceDir, `${theme}-${width}-wait-nodes.png`), fullPage: true });
+      }
+    }
+  }
+});

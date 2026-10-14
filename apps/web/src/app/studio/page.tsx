@@ -26,6 +26,8 @@ const palette: { kind: NodeKind; hint: string }[] = [
   { kind: "action.slack_message", hint: "Notify a channel" },
   { kind: "action.zoho_task_status", hint: "Update project task" },
   { kind: "action.app_callback", hint: "Notify custom app" },
+  { kind: "wait.app_event", hint: "Correlate a later event" },
+  { kind: "wait.github_pr_merge", hint: "Watch a pull request" },
   { kind: "agent", hint: "Bounded classification" },
   { kind: "approval", hint: "Human checkpoint" },
   { kind: "condition", hint: "True / false" },
@@ -623,6 +625,33 @@ export default function StudioPage() {
                     disabled={!canEdit} placeholder={`trigger.payload.${field}`} />
                 </div>)}
                 <p>Automiq signs and delivers this event to the app’s configured callback URL. The app should deduplicate event IDs.</p>
+              </>}
+              {selectedNode.type === "wait.app_event" && <>
+                <label htmlFor="wait-app-connection">Custom app</label>
+                <select id="wait-app-connection" value={String(selectedNode.config.connection_id || "")} disabled={!canEdit}
+                  onChange={(event) => { const item = appConnections.find((candidate) => candidate.id === event.target.value); const eventType = Object.keys(item?.inbound_schemas || {})[0] || "app.event.v1"; updateNode({ ...selectedNode, config: { ...selectedNode.config, connection_id: event.target.value, contract_version: item?.contract_version || 1, event_type: eventType } }); }}>
+                  <option value="00000000-0000-0000-0000-000000000000">Choose a connection</option>
+                  {appConnections.filter((item) => !item.revoked_at && Object.keys(item.inbound_schemas).length).map((item) => <option key={item.id} value={item.id}>{item.display_name}</option>)}
+                </select>
+                <label htmlFor="wait-app-type">Expected event type</label>
+                <select id="wait-app-type" value={String(selectedNode.config.event_type || "")} disabled={!canEdit || !selectedAppConnection} onChange={(event) => updateNode({ ...selectedNode, config: { ...selectedNode.config, event_type: event.target.value } })}>
+                  {Object.keys(selectedAppConnection?.inbound_schemas || {}).map((eventType) => <option key={eventType} value={eventType}>{eventType}</option>)}
+                </select>
+                <label htmlFor="wait-app-field">Required correlation field</label><input id="wait-app-field" value={String(selectedNode.config.correlation_field || "")} onChange={(event) => updateNode({ ...selectedNode, config: { ...selectedNode.config, correlation_field: event.target.value } })} disabled={!canEdit} placeholder="task_id" />
+                <label htmlFor="wait-app-path">Value from starting event</label><input id="wait-app-path" value={String(selectedNode.config.trigger_path || "")} onChange={(event) => updateNode({ ...selectedNode, config: { ...selectedNode.config, trigger_path: event.target.value } })} disabled={!canEdit} placeholder="trigger.payload.task_id" />
+                <label htmlFor="wait-app-timeout">Timeout (seconds)</label><input id="wait-app-timeout" type="number" min="5" max="604800" value={Number(selectedNode.config.timeout_seconds ?? 3600)} onChange={(event) => updateNode({ ...selectedNode, config: { ...selectedNode.config, timeout_seconds: Number(event.target.value) } })} disabled={!canEdit} />
+                <label htmlFor="wait-app-poll">Check interval (seconds)</label><input id="wait-app-poll" type="number" min="5" max="300" value={Number(selectedNode.config.poll_seconds ?? 30)} onChange={(event) => updateNode({ ...selectedNode, config: { ...selectedNode.config, poll_seconds: Number(event.target.value) } })} disabled={!canEdit} />
+                <p>The later signed event must use this connection, type, and correlation value. The run fails when the wait expires.</p>
+              </>}
+              {selectedNode.type === "wait.github_pr_merge" && <>
+                <label htmlFor="wait-pr-integration">GitHub integration</label><select id="wait-pr-integration" value={String(selectedNode.config.integration_id || "")} onChange={(event) => updateNode({ ...selectedNode, config: { ...selectedNode.config, integration_id: event.target.value } })} disabled={!canEdit}>
+                  <option value="00000000-0000-0000-0000-000000000000">Choose an integration</option>
+                  {integrations.filter((item) => item.provider === "github" && !item.revoked_at).map((item) => <option key={item.id} value={item.id}>{item.display_name}</option>)}
+                </select>
+                <label htmlFor="wait-pr-path">Pull request number path</label><input id="wait-pr-path" value={String(selectedNode.config.pr_number_path || "")} onChange={(event) => updateNode({ ...selectedNode, config: { ...selectedNode.config, pr_number_path: event.target.value } })} disabled={!canEdit} placeholder="trigger.payload.pr_number" />
+                <label htmlFor="wait-pr-timeout">Timeout (seconds)</label><input id="wait-pr-timeout" type="number" min="5" max="604800" value={Number(selectedNode.config.timeout_seconds ?? 86400)} onChange={(event) => updateNode({ ...selectedNode, config: { ...selectedNode.config, timeout_seconds: Number(event.target.value) } })} disabled={!canEdit} />
+                <label htmlFor="wait-pr-poll">Check interval (seconds)</label><input id="wait-pr-poll" type="number" min="5" max="300" value={Number(selectedNode.config.poll_seconds ?? 60)} onChange={(event) => updateNode({ ...selectedNode, config: { ...selectedNode.config, poll_seconds: Number(event.target.value) } })} disabled={!canEdit} />
+                <p>Checks the configured repository. A closed pull request without a merge fails the run.</p>
               </>}
               {selectedNode.type === "condition" && <><label htmlFor="condition-path">Value path</label><input id="condition-path" value={String((selectedNode.config.expression as Record<string, unknown>)?.path || "")} onChange={(event) => updateNode({ ...selectedNode, config: { expression: { ...(selectedNode.config.expression as object), path: event.target.value } } })} disabled={!canEdit} /><label htmlFor="condition-operator">Operator</label><select id="condition-operator" value={String((selectedNode.config.expression as Record<string, unknown>)?.operator || "eq")} onChange={(event) => updateNode({ ...selectedNode, config: { expression: { ...(selectedNode.config.expression as object), operator: event.target.value } } })} disabled={!canEdit}><option value="eq">Equals</option><option value="ne">Does not equal</option><option value="exists">Exists</option></select><label htmlFor="condition-value">Compare with</label><input id="condition-value" value={String((selectedNode.config.expression as Record<string, unknown>)?.value ?? "")} onChange={(event) => updateNode({ ...selectedNode, config: { expression: { ...(selectedNode.config.expression as object), value: event.target.value === "true" ? true : event.target.value === "false" ? false : event.target.value } } })} disabled={!canEdit} /><p>Use a path such as <code>trigger.payload.flag</code> or <code>steps.action_1.output.ok</code>.</p></>}
               {selectedNode.type === "trigger.github_issue" && <p>Signed GitHub issue events start this workflow. Create the webhook binding below after publishing.</p>}

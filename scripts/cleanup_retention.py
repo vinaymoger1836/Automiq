@@ -9,6 +9,7 @@ from app.config import get_settings
 from app.db import session_factory
 from app.models import (
     ActionEffect,
+    AppEventReceipt,
     Approval,
     AuditLog,
     IssueContent,
@@ -25,6 +26,7 @@ async def cleanup(*, apply: bool, batch_size: int) -> dict[str, int | bool]:
     settings = get_settings()
     now = datetime.now(UTC)
     detail_cutoff = now - timedelta(days=settings.run_detail_retention_days)
+    app_event_cutoff = now - timedelta(days=max(8, settings.run_detail_retention_days))
     summary_cutoff = now - timedelta(days=settings.run_summary_retention_days)
     async with session_factory()() as db:
         # Lock only terminal runs; never scrub or delete an active execution.
@@ -45,12 +47,31 @@ async def cleanup(*, apply: bool, batch_size: int) -> dict[str, int | bool]:
         runs = list(rows)
         detail_ids = [row.id for row in runs]
         summary_ids = [row.id for row in runs if row.completed_at < summary_cutoff]
+        old_app_receipts = list(
+            await db.scalars(
+                select(AppEventReceipt.id)
+                .where(
+                    AppEventReceipt.received_at < app_event_cutoff,
+                    AppEventReceipt.data_json != {},
+                )
+                .order_by(AppEventReceipt.received_at)
+                .limit(batch_size)
+                .with_for_update(skip_locked=True)
+            )
+        )
         result: dict[str, int | bool] = {
             "applied": apply,
             "details": len(detail_ids),
             "summaries": len(summary_ids),
+            "app_event_data": len(old_app_receipts),
         }
         if apply:
+            if old_app_receipts:
+                await db.execute(
+                    update(AppEventReceipt)
+                    .where(AppEventReceipt.id.in_(old_app_receipts))
+                    .values(data_json={})
+                )
             if detail_ids:
                 await db.execute(
                     update(WorkflowRun)

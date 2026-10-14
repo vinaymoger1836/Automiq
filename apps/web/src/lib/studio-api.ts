@@ -1,6 +1,6 @@
 export type Role = "owner" | "editor" | "viewer";
 export type NodeKind = "trigger.manual" | "trigger.github_issue" | "trigger.schedule" | "trigger.app_event" |
-  "action.http" | "action.github_comment" | "action.slack_message" | "action.zoho_task_status" | "action.app_callback" | "agent" | "approval" | "condition" | "end";
+  "action.http" | "action.github_comment" | "action.slack_message" | "action.zoho_task_status" | "action.app_callback" | "wait.app_event" | "wait.github_pr_merge" | "agent" | "approval" | "condition" | "end";
 export type Scalar = string | number | boolean | null;
 export type GraphNode = {
   id: string;

@@ -4,7 +4,34 @@
 
 The first generic slice is implemented in code: workspace owners register a custom app through the UI/API, define bounded event schemas, receive one-time inbound/outbound signing secrets, rotate or revoke those secrets, bind an inbound event type to a published workflow, and add a signed callback action. One generic endpoint accepts CloudEvents 1.0 JSON for any configured app. The event receipt, run, queued event, and Temporal start outbox commit together. Callback activities use a stable event ID, persist attempts/status, verify a fixed HTTPS destination through pinned DNS/TLS, and require the receiving app to deduplicate retries. Two different apps can be configured without editing Automiq code.
 
-This is a first slice. The generic durable wait-for-event node, external correlation/status query for app identities, GitHub PR status/merge adapter, and automatic task-closure workflow from the original example are **not implemented**. A connection definition is immutable at version 1; adding event types currently means creating another connection. Event `data` supports a bounded, flat JSON Schema object subset of `string`, `integer`, `number`, `boolean`, or `null` fields.
+The first slice did not include event waiting or the PR adapter. Their P7-06 implementation is described below and awaits full-stack verification. An external correlation/status query for app identities is still absent. A connection definition is immutable at version 1; adding event types currently means creating another connection. Event `data` supports a bounded, flat JSON Schema object subset of `string`, `integer`, `number`, `boolean`, or `null` fields.
+
+## P7-06 implementation pending full-stack verification (2026-10-14)
+
+The graph now has `wait.app_event` and `wait.github_pr_merge` nodes. Temporal holds each wait with bounded polling timers and database/provider checks in activities, so a worker restart can replay the wait. App events now persist their validated type and bounded data for correlation. The app wait matches one required string or integer field against the starting run's payload, within the same workspace and connection, using only events received after the run was created. The PR wait reads the fixed repository from a workspace GitHub integration and checks the configured PR number through GitHub's read-only pull request API. A merged PR continues; a closed unmerged PR or timeout fails the run. In local/test fake-provider mode, the PR is open for one check and then merged. Neither wait mutates GitHub.
+
+The original task auto-close composition is: signed task-created event → wait for a correlated completion event or GitHub PR merge → signed custom-app callback (or the existing Zoho task status action) → end. The browser editor exposes both waits and their bounds. Migration `0009_phase7_event_wait` is additive; historical receipts have empty correlation data and cannot satisfy waits. Connection definitions remain version 1. Event data is stored as bounded JSONB, so send only non-sensitive identifiers and statuses. The retention job scrubs correlation data after the longer of eight days or the run-detail retention period while keeping receipt identity for deduplication. Polling intervals of 5–300 seconds, a maximum seven-day wait, and no more than 2500 checks bound Temporal history growth; operators should keep intervals appropriate to their workflow volume.
+
+Verification performed: `uv run --frozen ruff check .`, `uv run --frozen mypy`, web typecheck/lint, Python compile, and Temporal workflow sandbox preparation passed. The full-stack script `uv run --frozen python scripts/check_phase7_waits.py` produced ignored `artifacts/e2e/phase7-waits/report.json` with `ConnectError` and zero scenarios because the Docker daemon/API was unavailable. P7-06 remains unchecked. No live GitHub API or task app was used.
+
+When Docker is available, run from the repository root with synthetic `.env` values:
+
+```powershell
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+npm.cmd --prefix apps/web ci
+$env:UV_CACHE_DIR=Join-Path (Get-Location) '.uv-cache'
+uv run --frozen python scripts/prepare_app_e2e.py
+docker compose --env-file .env --env-file .env.app-e2e.local -f infra/compose.yaml -f infra/compose.app-e2e.yaml up -d --build
+docker compose --env-file .env --env-file .env.app-e2e.local -f infra/compose.yaml -f infra/compose.app-e2e.yaml exec -T api uv run --frozen --no-dev alembic -c alembic.ini upgrade head
+docker compose --env-file .env --env-file .env.app-e2e.local -f infra/compose.yaml -f infra/compose.app-e2e.yaml exec -T api uv run --frozen --no-dev alembic -c alembic.ini check
+uv run --frozen python scripts/check_phase7_waits.py
+Push-Location apps/web
+.\node_modules\.bin\playwright.cmd install chromium
+.\node_modules\.bin\playwright.cmd test --config=playwright.app-connections.config.ts
+Pop-Location
+```
+
+The new API E2E checks a wrong correlation, duplicate matching event, worker restart while waiting, signed task auto-close, fake PR merge, and timeout. The browser spec adds wait-node inspector screenshots in light/dark themes at 375 and 1280 pixels and overflow checks at 375, 768, 1280, and 1440 pixels. Reports/screenshots remain ignored under `artifacts/e2e/phase7-waits/` and `artifacts/e2e/app-connections/`. The real GitHub response path and live app bridge still need optional credential-backed smoke verification.
 
 ## App contract
 

@@ -28,6 +28,7 @@ from orchestrator.bootstrap_workflow import BootstrapCheck
 from orchestrator.engine import WorkflowExecution
 from orchestrator.schedule_engine import ScheduleFire
 from orchestrator.schedules import create_scheduled_run, reconcile_schedules
+from orchestrator.waits import check_app_event_wait, check_github_pr_merge
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,8 @@ async def main() -> None:
             execute_https_action,
             execute_provider_activity,
             execute_app_callback,
+            check_app_event_wait,
+            check_github_pr_merge,
             execute_agent,
             open_approval,
             approval_status,

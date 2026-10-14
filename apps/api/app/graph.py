@@ -49,6 +49,35 @@ class AppCallbackConfig(StrictModel):
         return self
 
 
+class AppEventWaitConfig(StrictModel):
+    connection_id: uuid.UUID
+    contract_version: int = Field(default=1, ge=1)
+    event_type: str = Field(pattern=r"^[a-z][a-z0-9_.-]{2,79}$")
+    correlation_field: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_]{0,39}$")
+    trigger_path: str = Field(pattern=r"^trigger\.payload\.[A-Za-z][A-Za-z0-9_]{0,39}$")
+    timeout_seconds: int = Field(default=3600, ge=5, le=604800)
+    poll_seconds: int = Field(default=30, ge=5, le=300)
+
+    @model_validator(mode="after")
+    def bounded_checks(self) -> "AppEventWaitConfig":
+        if self.timeout_seconds > self.poll_seconds * 2500:
+            raise ValueError("Wait may perform at most 2500 checks")
+        return self
+
+
+class GithubPrMergeWaitConfig(StrictModel):
+    integration_id: uuid.UUID
+    pr_number_path: str = Field(pattern=r"^trigger\.payload\.[A-Za-z][A-Za-z0-9_]{0,39}$")
+    timeout_seconds: int = Field(default=86400, ge=5, le=604800)
+    poll_seconds: int = Field(default=60, ge=5, le=300)
+
+    @model_validator(mode="after")
+    def bounded_checks(self) -> "GithubPrMergeWaitConfig":
+        if self.timeout_seconds > self.poll_seconds * 2500:
+            raise ValueError("Wait may perform at most 2500 checks")
+        return self
+
+
 class HttpConfig(StrictModel):
     operation: Literal["mock", "https_get"] = "mock"
     mock_output: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
@@ -257,6 +286,20 @@ class AppCallbackNode(StrictModel):
     position: Position | None = None
 
 
+class AppEventWaitNode(StrictModel):
+    id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
+    type: Literal["wait.app_event"]
+    config: AppEventWaitConfig
+    position: Position | None = None
+
+
+class GithubPrMergeWaitNode(StrictModel):
+    id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
+    type: Literal["wait.github_pr_merge"]
+    config: GithubPrMergeWaitConfig
+    position: Position | None = None
+
+
 class AgentNode(StrictModel):
     id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
     type: Literal["agent"]
@@ -281,6 +324,8 @@ Node = Annotated[
     | SlackMessageNode
     | ZohoTaskStatusNode
     | AppCallbackNode
+    | AppEventWaitNode
+    | GithubPrMergeWaitNode
     | AgentNode
     | ApprovalNode
     | ConditionNode

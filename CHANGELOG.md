@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added bounded app-event and GitHub PR merge wait nodes with editor controls and a synthetic task auto-close E2E flow; full-stack verification is pending a local Docker daemon.
 - Added local workspace sign-in, role-aware workflow management, graph validation, immutable publishing, and audit records.
 - Added durable manual runs through a PostgreSQL outbox and Temporal worker, with retry, deadline, event history, and viewer-redacted inspection.
 - Added the responsive visual studio with light and dark themes, browser-based authoring, run progress, and an editor/viewer E2E flow.

@@ -304,6 +304,30 @@ async def bind_app_trigger(
         node["type"] == "trigger.app_event" for node in version.graph_json["nodes"]
     ):
         raise HTTPException(status_code=409, detail="Published graph needs an app event trigger")
+    source_schema = connection.inbound_schemas[body.event_type]
+    for node in version.graph_json["nodes"]:
+        if node["type"] not in {"wait.app_event", "wait.github_pr_merge"}:
+            continue
+        config = node["config"]
+        path = config.get("trigger_path", config.get("pr_number_path", ""))
+        field = path.rsplit(".", 1)[-1]
+        source_type = source_schema.get("properties", {}).get(field, {}).get("type")
+        if field not in source_schema.get("required", []):
+            raise HTTPException(
+                status_code=422, detail="Wait input must be a required trigger field"
+            )
+        if node["type"] == "wait.github_pr_merge" and source_type != "integer":
+            raise HTTPException(
+                status_code=422, detail="PR number must be an integer trigger field"
+            )
+        if node["type"] == "wait.app_event":
+            target = await scoped_connection(db, ws, uuid.UUID(config["connection_id"]))
+            target_schema = target.inbound_schemas.get(config["event_type"], {})
+            target_type = target_schema.get("properties", {}).get(
+                config["correlation_field"], {}
+            ).get("type")
+            if target.revoked_at is not None or source_type != target_type:
+                raise HTTPException(status_code=422, detail="Wait correlation types must match")
     row = Trigger(
         id=uuid.uuid4(),
         public_id=secrets.token_urlsafe(24),
@@ -450,6 +474,8 @@ async def receive_event(public_id: str, request: Request, db: Db) -> EventAccept
         connection_id=connection.id,
         source=event.source,
         event_id=event.id,
+        event_type=event.type,
+        data_json=event.data,
         payload_hash=digest,
         run_ids_json=[],
     )
