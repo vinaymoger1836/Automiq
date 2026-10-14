@@ -43,8 +43,9 @@ def main() -> None:
     # Keep an existing local key so synthetic integrations in the persisted test DB
     # remain decryptable when the short-lived TLS certificate is renewed.
     if not env_path.exists():
+        encoded_key = base64.b64encode(secrets.token_bytes(32)).decode()
         env_path.write_text(
-            "INTEGRATION_ENCRYPTION_KEY=" + base64.b64encode(secrets.token_bytes(32)).decode() + "\n",
+            "INTEGRATION_ENCRYPTION_KEY=" + encoded_key + "\n",
             encoding="utf-8",
         )
         env_path.chmod(0o600)
