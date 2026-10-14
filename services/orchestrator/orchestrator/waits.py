@@ -69,8 +69,10 @@ async def check_github_pr_merge(command: dict[str, Any]) -> dict[str, Any]:
         if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
             raise ProviderError("integration_unavailable")
         if get_settings().integration_provider_mode == "fake":
-            # The deterministic test adapter stays open for one check, then merges.
-            state = "open" if command["poll_index"] == 0 else "merged"
+            # Synthetic PR 124 exercises the closed-without-merge failure path.
+            state = "closed_unmerged" if number == 124 else (
+                "open" if command["poll_index"] == 0 else "merged"
+            )
         else:
             from urllib.parse import quote
 

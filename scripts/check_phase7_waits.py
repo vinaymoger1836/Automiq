@@ -225,6 +225,16 @@ async def run() -> None:
               pr_wait["output"]["repository"] == "example/tasks",
               "merge result pinned to configured repository")
 
+        closed_task = f"task-{nonce}-closed-pr"
+        closed_pr = await deliver(client, connection, "com.example.task.ready.v1",
+                                  {"task_id": closed_task, "pr_number": 124})
+        check(closed_pr.status_code == 202, "closed PR task queued")
+        closed_run = await wait_state(client, ws, closed_pr.json()["run_ids"][0],
+                                      {"succeeded", "failed"})
+        check(closed_run["status"] == "failed" and
+              closed_run["error"] == "pr_closed_unmerged",
+              "closed unmerged PR fails without auto-closing task")
+
         timeout_task = f"task-{nonce}-timeout"
         timed = await deliver(client, connection, "com.example.task.created.v1",
                               {"task_id": timeout_task})
@@ -246,7 +256,9 @@ async def run() -> None:
         our_receipts = [
             row for row in receipts
             if row.get("event_type") == "com.automiq.task.closed.v1"
-            and row.get("data", {}).get("task_id") in {task_id, pr_task, timeout_task}
+            and row.get("data", {}).get("task_id") in {
+                task_id, pr_task, closed_task, timeout_task,
+            }
         ]
         check(
             {row["data"]["task_id"] for row in our_receipts} == {task_id, pr_task}
