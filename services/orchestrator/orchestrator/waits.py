@@ -79,6 +79,7 @@ async def check_github_pr_merge(command: dict[str, Any]) -> dict[str, Any]:
                 "GET",
                 f"/repos/{quote(repository, safe='/')}/pulls/{number}",
                 values["token"],
+                max_response_bytes=65_536,
             )
             if data.get("number") != number or data.get("state") not in {"open", "closed"}:
                 raise ProviderError("invalid_provider_response")

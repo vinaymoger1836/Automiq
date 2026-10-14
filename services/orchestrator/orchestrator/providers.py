@@ -79,6 +79,7 @@ async def provider_json(
     body: dict[str, Any] | None = None,
     params: dict[str, str] | None = None,
     mutation: bool = False,
+    max_response_bytes: int = MAX_PROVIDER_RESPONSE,
 ) -> dict[str, Any]:
     allowed_hosts = {"api.github.com", "slack.com"} | {
         project_host for _, project_host in ZOHO_HOSTS.values()
@@ -130,7 +131,7 @@ async def provider_json(
                     data = bytearray()
                     async for chunk in response.aiter_raw():
                         data.extend(chunk)
-                        if len(data) > MAX_PROVIDER_RESPONSE:
+                        if len(data) > max_response_bytes:
                             raise ProviderError("provider_response_too_large")
                     try:
                         parsed = json.loads(data)
