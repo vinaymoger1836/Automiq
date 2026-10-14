@@ -40,11 +40,14 @@ def main() -> None:
     )
     key_path.chmod(0o600)
     env_path = Path(".env.app-e2e.local")
-    env_path.write_text(
-        "INTEGRATION_ENCRYPTION_KEY=" + base64.b64encode(secrets.token_bytes(32)).decode() + "\n",
-        encoding="utf-8",
-    )
-    env_path.chmod(0o600)
+    # Keep an existing local key so synthetic integrations in the persisted test DB
+    # remain decryptable when the short-lived TLS certificate is renewed.
+    if not env_path.exists():
+        env_path.write_text(
+            "INTEGRATION_ENCRYPTION_KEY=" + base64.b64encode(secrets.token_bytes(32)).decode() + "\n",
+            encoding="utf-8",
+        )
+        env_path.chmod(0o600)
     print("Synthetic app TLS and ignored E2E environment file are ready")
 
 
